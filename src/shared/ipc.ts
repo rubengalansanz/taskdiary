@@ -1,33 +1,272 @@
+import { z } from 'zod'
+
 /**
- * The closed IPC contract between the main process, the preload bridge and the
- * renderer.
+ * The closed IPC contract between the main process, the preload bridge and the renderer.
  *
- * This module is deliberately dependency-free (no Electron, no Node built-ins) so
- * all three build targets can import it: main and preload import the channel
- * values, the renderer imports nothing because the ambient `window.taskDiary`
- * declaration in `src/preload/index.d.ts` re-exports these shapes as globals.
+ * This module is the single source of truth for channels and payloads (plan rule §2.4).
+ * It is deliberately dependency-free apart from Zod — no Electron, no Node built-ins — so
+ * all three build targets can import it. The renderer never imports it at runtime: the
+ * ambient `window.taskDiary` declaration in `src/preload/index.d.ts` re-publishes these
+ * shapes as globals.
+ *
+ * Adding a channel means adding it here, adding a Zod schema, and registering a handler.
+ * Nothing else grants the renderer a capability.
  */
 
-/** Channel names used by the Phase 0 bridge. */
-export const IPC_CHANNELS = {
-  /** `invoke`: run the database probe and return its result. */
-  dbProbe: 'taskdiary:db:probe',
-  /** `invoke`: read the current OS theme preference. */
-  themeIsDark: 'taskdiary:theme:is-dark',
-  /** `send`: main pushes theme changes to the renderer. */
-  themeChanged: 'taskdiary:theme:changed'
-} as const
+// ---------------------------------------------------------------------------
+// Reusable field schemas
+// ---------------------------------------------------------------------------
+
+/** A local calendar day, `YYYY-MM-DD`. Shape only; real-date checks live in `core/validation.ts`. */
+export const localDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+  message: 'La fecha debe tener el formato AAAA-MM-DD.'
+})
+
+/** Minutes since midnight, `0`–`1439`. `null` when the field is unset. */
+const minuteOfDaySchema = z.number().int().min(0).max(1439).nullable()
+
+/** A planned duration in minutes. `null` when the task is not estimated. */
+const estimateSchema = z.number().int().min(1).max(1440).nullable()
+
+/** ISO weekdays, 1 (Monday) through 7 (Sunday). */
+const weekdaySchema = z.number().int().min(1).max(7)
+
+/** An opaque task identifier. Not forced to be a UUID: Fase 5 materialises ids of its own. */
+const taskIdSchema = z.string().min(1).max(64)
+
+/** Recurrence frequency of a task series. */
+export const rruleFreqSchema = z.enum(['none', 'daily', 'weekly', 'monthly', 'weekdays'])
+
+/** Lifecycle state of a task. */
+export const taskStatusSchema = z.enum(['pending', 'in_progress', 'done', 'cancelled'])
+
+// ---------------------------------------------------------------------------
+// Payloads
+// ---------------------------------------------------------------------------
+
+/** Request for `task:list` — the tasks of one calendar day. */
+export const listTasksRequestSchema = z.object({
+  taskDate: localDateSchema
+})
+
+/** Request for `task:listRange` — every task between two days, inclusive. */
+export const listTaskRangeRequestSchema = z.object({
+  fromDate: localDateSchema,
+  toDate: localDateSchema
+})
+
+/** Request for `task:create`. Every field except `title` and `taskDate` is optional. */
+export const createTaskRequestSchema = z.object({
+  title: z.string().max(500),
+  notes: z.string().max(50_000).nullish(),
+  taskDate: localDateSchema,
+  startMin: minuteOfDaySchema.optional(),
+  endMin: minuteOfDaySchema.optional(),
+  estimateMin: estimateSchema.optional(),
+  color: z.string().max(32).nullish(),
+  rruleFreq: rruleFreqSchema.optional(),
+  rruleInterval: z.number().int().min(1).max(52).optional(),
+  rruleDays: z.array(weekdaySchema).max(7).nullish(),
+  rruleUntil: localDateSchema.nullish(),
+  rruleFrom: localDateSchema.nullish()
+})
+
+/** Request for `task:update` — only the fields present are changed. */
+export const updateTaskRequestSchema = z.object({
+  id: taskIdSchema,
+  status: taskStatusSchema.optional(),
+  title: z.string().max(500).optional(),
+  notes: z.string().max(50_000).nullish(),
+  taskDate: localDateSchema.optional(),
+  startMin: minuteOfDaySchema.optional(),
+  endMin: minuteOfDaySchema.optional(),
+  estimateMin: estimateSchema.optional(),
+  color: z.string().max(32).nullish(),
+  rruleFreq: rruleFreqSchema.optional(),
+  rruleInterval: z.number().int().min(1).max(52).optional(),
+  rruleDays: z.array(weekdaySchema).max(7).nullish(),
+  rruleUntil: localDateSchema.nullish(),
+  rruleFrom: localDateSchema.nullish()
+})
+
+/** Request for `task:delete`. */
+export const deleteTaskRequestSchema = z.object({
+  id: taskIdSchema
+})
+
+/** Request for `task:setStatus` — Fase 2 opens this channel. */
+export const setTaskStatusRequestSchema = z.object({
+  id: taskIdSchema,
+  status: taskStatusSchema
+})
+
+// ---------------------------------------------------------------------------
+// Responses
+// ---------------------------------------------------------------------------
+
+/** A task as it travels over the bridge. Mirrors the domain model in `core/task.ts`. */
+export const taskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  notes: z.string().nullable(),
+  taskDate: localDateSchema,
+  status: taskStatusSchema,
+  startMin: z.number().int().nullable(),
+  endMin: z.number().int().nullable(),
+  estimateMin: z.number().int().nullable(),
+  color: z.string().nullable(),
+  rruleFreq: rruleFreqSchema,
+  rruleInterval: z.number().int(),
+  rruleDays: z.array(z.number().int()).nullable(),
+  rruleUntil: localDateSchema.nullable(),
+  rruleFrom: localDateSchema.nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().nullable()
+})
+
+/** Error codes that can cross the bridge. Mirrors `AppErrorCode` in `core/errors.ts`. */
+export const appErrorCodeSchema = z.enum([
+  'VALIDATION_FAILED',
+  'TASK_NOT_FOUND',
+  'TASK_TITLE_REQUIRED',
+  'TASK_INVALID_TIME_RANGE',
+  'TASK_INVALID_TRANSITION',
+  'FOCUS_ALREADY_SET',
+  'DATABASE_ERROR'
+])
+
+/**
+ * A failed operation.
+ *
+ * The main process never lets a raw `Error` through: no stack traces, no absolute paths.
+ * The renderer gets a code to branch on and a message to show.
+ */
+export const appErrorSchema = z.object({
+  code: appErrorCodeSchema,
+  message: z.string(),
+  details: z
+    .object({
+      field: z.string().optional(),
+      currentStatus: z.string().optional(),
+      requestedStatus: z.string().optional(),
+      conflictingTaskTitle: z.string().optional(),
+      fieldMessages: z.record(z.string(), z.string()).optional()
+    })
+    .optional()
+})
+
+/** A result that either succeeded or failed. Discriminated by `ok`. */
+export const taskResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), task: taskSchema }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** A list result that either succeeded or failed. */
+export const taskListResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), tasks: z.array(taskSchema) }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** A deletion result. `removed` is false when the id did not exist. */
+export const deleteTaskResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), removed: z.boolean() }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
 
 /** Result of the Phase 0 database probe. */
-export interface TaskDiaryDbProbeResult {
-  /** True when the database opened and `SELECT 1` answered with 1. */
-  ok: boolean
-  /** SQLite library version reported by the open handle, when available. */
-  sqliteVersion?: string
-  /** Absolute path of the probed database file. */
-  path: string
-  /** Human readable failure reason when `ok` is false. */
-  error?: string
+export const dbProbeResultSchema = z.object({
+  ok: z.boolean(),
+  sqliteVersion: z.string().optional(),
+  path: z.string(),
+  error: z.string().optional(),
+  /** Schema version recorded in `PRAGMA user_version`. Fase 1. */
+  schemaVersion: z.number().int().optional(),
+  /** Whether the `tasks` table exists, i.e. the migrations actually ran. Fase 1. */
+  hasTasksTable: z.boolean().optional()
+})
+
+/** Result of the Phase 0 database probe. */
+export type TaskDiaryDbProbeResult = z.infer<typeof dbProbeResultSchema>
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** A task as seen by the renderer. */
+export type TaskDto = z.infer<typeof taskSchema>
+/** Lifecycle state of a task. */
+export type TaskStatusDto = z.infer<typeof taskStatusSchema>
+/** Recurrence frequency of a task series. */
+export type RruleFreqDto = z.infer<typeof rruleFreqSchema>
+/** A failed operation. */
+export type AppErrorDto = z.infer<typeof appErrorSchema>
+
+/** Request for `task:list`. */
+export type ListTasksRequest = z.infer<typeof listTasksRequestSchema>
+/** Request for `task:listRange`. */
+export type ListTaskRangeRequest = z.infer<typeof listTaskRangeRequestSchema>
+/** Request for `task:create`. */
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>
+/** Request for `task:update`. */
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>
+/** Request for `task:delete`. */
+export type DeleteTaskRequest = z.infer<typeof deleteTaskRequestSchema>
+
+/** Result of `task:list` / `task:create` / `task:update` / `task:setStatus`. */
+export type TaskResultDto = z.infer<typeof taskResultSchema>
+/** Result of `task:list` / `task:listRange`. */
+export type TaskListResultDto = z.infer<typeof taskListResultSchema>
+/** Result of `task:delete`. */
+export type DeleteTaskResultDto = z.infer<typeof deleteTaskResultSchema>
+
+// ---------------------------------------------------------------------------
+// Channels
+// ---------------------------------------------------------------------------
+
+/** Every channel the main process listens on. Nothing outside this map exists. */
+export const IPC_CHANNELS = {
+  /** Phase 0: run the database probe and return its result. */
+  dbProbe: 'taskdiary:db:probe',
+  /** Phase 0: read the current OS theme preference. */
+  themeIsDark: 'taskdiary:theme:is-dark',
+  /** Phase 0: main pushes theme changes to the renderer. */
+  themeChanged: 'taskdiary:theme:changed',
+  /** Phase 1: tasks of one calendar day. */
+  taskList: 'taskdiary:task:list',
+  /** Phase 1: every task between two calendar days, inclusive. */
+  taskListRange: 'taskdiary:task:list-range',
+  /** Phase 1: insert a task. */
+  taskCreate: 'taskdiary:task:create',
+  /** Phase 1: partially update a task. */
+  taskUpdate: 'taskdiary:task:update',
+  /** Phase 1: delete a task. */
+  taskDelete: 'taskdiary:task:delete',
+  /** Phase 2: move a task through the state machine. */
+  taskSetStatus: 'taskdiary:task:set-status'
+} as const
+
+/** Name of any channel in {@link IPC_CHANNELS}. */
+export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
+
+// ---------------------------------------------------------------------------
+// The renderer-facing API
+// ---------------------------------------------------------------------------
+
+/** CRUD surface the preload exposes for tasks. */
+export interface TaskApi {
+  /** Tasks of one calendar day, ordered by start time. */
+  list(request: ListTasksRequest): Promise<TaskListResultDto>
+  /** Every task in an inclusive day range. */
+  listRange(request: ListTaskRangeRequest): Promise<TaskListResultDto>
+  /** Inserts a task and returns it as stored. */
+  create(request: CreateTaskRequest): Promise<TaskResultDto>
+  /** Applies a partial update and returns the task as stored. */
+  update(request: UpdateTaskRequest): Promise<TaskResultDto>
+  /** Deletes a task; `removed` is false when the id did not exist. */
+  delete(request: DeleteTaskRequest): Promise<DeleteTaskResultDto>
+  /** Moves a task through the state machine. Registered in Fase 2. */
+  setStatus(request: { id: string; status: TaskStatusDto }): Promise<TaskResultDto>
 }
 
 /** Light/dark theme bridge backed by Electron's `nativeTheme`. */
@@ -46,8 +285,10 @@ export interface TaskDiaryThemeApi {
 export interface TaskDiaryApi {
   /** Phase 0 database diagnostics. */
   db: {
-    probe(): Promise<TaskDiaryDbProbeResult>
+    probe(): Promise<z.infer<typeof dbProbeResultSchema>>
   }
+  /** Phase 1 task CRUD. */
+  tasks: TaskApi
   /** Light/dark theme bridge. */
   theme: TaskDiaryThemeApi
 }

@@ -91,16 +91,25 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ### Fase 1 · Datos — 1 día
 
-- [ ] `Database` con `better-sqlite3` + pragmas (`WAL`, `foreign_keys`) + transacciones
-- [ ] Migración `0001_init.sql` y runner
-- [ ] Modelos de dominio + máquina de estados de `TaskStatus`
-- [ ] Repositorio de tareas con CRUD completo
-- [ ] Contrato IPC (`src/shared/ipc-contract.ts`) + proxy del preload + esquemas Zod
-- [ ] Canales `task:list`, `task:create`, `task:update`, `task:delete`
-- [ ] Manejo de errores: `AppError` con código, mapeado a mensaje legible en el renderer
-- [ ] Tests unitarios de los repositorios (BD en memoria, Vitest en Node normal — §8.3)
+- [x] `Database` con `better-sqlite3` + pragmas (`WAL`, `foreign_keys`) + transacciones
+- [x] Migración `0001_init.sql` y runner
+- [x] Modelos de dominio + máquina de estados de `TaskStatus`
+- [x] Repositorio de tareas con CRUD completo
+- [x] Contrato IPC (`src/shared/ipc.ts`) + proxy del preload + esquemas Zod
+- [x] Canales `task:list`, `task:create`, `task:update`, `task:delete`
+- [x] Manejo de errores: `AppError` con código, mapeado a mensaje legible en el renderer
+- [x] Tests unitarios de los repositorios (BD en memoria, Vitest en Node normal — §8.3)
 
 **Entregable:** crear y leer tareas desde la ventana.
+
+> **Desviación documentada (alcance):** el entregable dice «desde la ventana», pero la lista
+> de esta fase no incluye ningún componente de UI — `TaskList`, `TaskForm` y `TitleBar` son
+> de Fase 2. **Decisión tomada con el usuario (2026-10-10): Fase 1 entrega la capa de datos
+> y el puente; la UI real llega en Fase 2.** Lo que sí se entrega desde la ventana es la
+> prueba funcional: `npm run smoke` lanza el build real y ejercita los seis canales por CDP.
+> El smoke verifica en la app real que `task:create`, `list`, `update`, `delete` y
+> `setStatus` funcionan, que un payload inválido devuelve `AppErrorDto` **sin tocar la BD**,
+> y que `require`/`process`/`Buffer` siguen sin existir en el renderer.
 
 **Criterio de aceptación**
 - Un payload IPC mal formado (fecha inválida, título vacío) se rechaza en el main y **la BD no se toca**.
@@ -345,6 +354,10 @@ Definidas **30 días después de instalar la v1.0**.
 | ADR-009 | Stack fijado a versiones estables verificadas; `typescript@5.9.3` y `vite@7.3.7` anclados por peer-deps de `typescript-eslint` y `electron-vite` | Aceptada |
 | ADR-010 | Electron inicializado en la raíz del repo, con `name`/`appId` coherentes con el directorio | Aceptada |
 | ADR-011 | `better-sqlite3` se usa directamente desde N-API: **sin** `install-app-deps` en `postinstall`, y tests de repositorio en Node normal con BD `:memory:` | Aceptada |
+| ADR-012 | Esquema completo en una sola migración `0001_init.sql`, versionado en `PRAGMA user_version` | Aceptada (Fase 1) |
+| ADR-013 | Las migraciones se importan como strings (`?raw`), no se leen del disco | Aceptada (Fase 1) |
+| ADR-014 | `done` es terminal: ninguna transición sale de él, ni en dos pasos | Aceptada (Fase 1) |
+| ADR-015 | La UI y los mensajes de error van en español; identificadores y comentarios en inglés | Aceptada (Fase 1) |
 
 ---
 

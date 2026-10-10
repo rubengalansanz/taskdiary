@@ -3,7 +3,10 @@ import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { resolveDatabasePath } from './core/database-path'
-import { openDatabase, pingDatabase, readSqliteVersion } from './db/database'
+import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/database'
+import { readSchemaVersion, runMigrations } from './db/migrate'
+import { TasksRepository } from './db/repositories/tasks-repo'
+import { registerTaskIpcHandlers } from './ipc/tasks'
 import { IPC_CHANNELS, type TaskDiaryDbProbeResult } from '../shared/ipc'
 
 /** Size of the Phase 0 window, in device-independent pixels. */
@@ -42,7 +45,13 @@ function probeDatabaseAt(filePath: string): TaskDiaryDbProbeResult {
       return { ok: false, path: filePath, sqliteVersion, error: 'SELECT 1 did not return 1' }
     }
 
-    return { ok: true, path: filePath, sqliteVersion }
+    return {
+      ok: true,
+      path: filePath,
+      sqliteVersion,
+      schemaVersion: readSchemaVersion(database),
+      hasTasksTable: hasTable(database, 'tasks')
+    }
   } catch (error) {
     return { ok: false, path: filePath, error: describeError(error) }
   } finally {
@@ -210,8 +219,23 @@ if (!app.requestSingleInstanceLock()) {
 
     console.log(`[database] ${probe.path} (SQLite ${probe.sqliteVersion}) SELECT 1 -> 1`)
 
-    buildApplicationMenu()
+    // The database stays open for the whole session: better-sqlite3 is synchronous, so
+    // every repository call is a direct read or write with no connection pool to manage.
+    // Migrations run once, before any channel is registered, so no handler can observe a
+    // half-migrated schema.
+    const database = openDatabase(databasePath)
+    const report = runMigrations(database)
+
+    if (report.applied.length > 0) {
+      console.log(
+        `[database] schema v${report.fromVersion} -> v${report.toVersion}: ${report.applied.join(', ')}`
+      )
+    }
+
     registerIpcHandlers()
+    registerTaskIpcHandlers(new TasksRepository(database))
+
+    buildApplicationMenu()
     createWindow()
 
     app.on('activate', () => {
