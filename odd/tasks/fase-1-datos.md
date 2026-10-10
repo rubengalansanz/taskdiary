@@ -167,6 +167,25 @@ Cinco fallos reales que aparecieron al escribir los tests. Se documentan porque 
 | 4 | `last_insert_rowid()` usado como si fuera el UUID | Devuelve el rowid entero, no el id de texto. Habría devuelto la tarea equivocada sin fallar |
 | 5 | `done → cancelled → pending` esquivaba la transición prohibida | `done → pending` estaba rechazada "para no reescribir la historia", pero el paso intermedio la rodeaba. Una ruta de dos pasos hacia un estado prohibido no es una restricción, es un comentario. **Arreglo:** `done` es terminal de verdad (ADR-014) |
 
+## Agujeros de validación encontrados por la revisión del pre-commit
+
+La revisión automática del hook列出 seis observaciones. Cinco eran reales, y dos eran
+**agujeros por los que una tarea inválida llegaba a la base de datos**. Ninguno lo detectó
+`npm run test`: los tests de Node llamaban al repositorio directamente y nunca componían
+un update parcial sobre una fila ya guardada.
+
+| # | Agujero | Por qué importa | Arreglo |
+| --- | --- | --- | --- |
+| 1 | `assertTimeRange` solo se llamaba en el IPC **si el payload traía ambos extremos** | Una tarea con `startMin: 600` almacenado podía recibir un update con solo `endMin: 300` y quedaba **10:00 → 05:00** en la base de datos. El límite no puede vivir en el borde: la capa que valida no ve el valor guardado | Se valida el rango **fusionado** en `TasksRepository.update`, que es el único que ve ambos extremos. El chequeo del IPC se queda como rechazo temprano |
+| 2 | Un update que enviaba solo `rruleDays` **se saltaba** la validación de recurrencia | La condición era `rruleFreq !== undefined`, y cambiar la lista de días cambia la regla igual | Se revalida cuando llega **cualquier** campo `rrule*`, y **fusionado con la regla almacenada** antes de validar. Antes de arreglarlo, `content as RecurrenceInput` pasaba un objeto parcial: `rruleInterval` llegaba `undefined` y el validador fallaba por un motivo que no tenía que ver con el cambio |
+| 3 | `COLUMN_BY_FIELD`, `WRITABLE_FIELDS` y `writableKeys` eran **tres listas** a mano | El comentario afirmaba que "no pueden divergir" y era falso: añadir un campo a `Task` compilaba limpio y quedaba sin escribir | `WRITABLE_TASK_FIELDS` en `core/task.ts` es la lista de dominio; `COLUMN_BY_FIELD` es un `Record` **total** sobre ella, así que olvidar una columna es error de compilación |
+| 4 | `MAX_TITLE_LENGTH` valía 200 en el dominio y `.max(500)` en Zod | Dos fuentes de verdad **ya discrepaban**: un título de 300 caracteres pasaba Zod y lo rechazaba el dominio | Los límites se declaran una vez en `src/shared/ipc.ts`. `core/` importa de `shared/`, que es la dirección permitida — la inversa arrastraría el dominio al bundle del preload |
+| 5 | `export type { AppErrorDetails, ListTasksRequest }` sin nadie que lo importara | Ruido | Eliminado |
+
+Los casts `as TaskStatus` / `as RruleFreq` de `toTask` se conservan: los `CHECK` del esquema
+lo garantizan. Se documentó el vínculo en el JSDoc, porque a un revisor le parecen sin
+verificar.
+
 ## Checks ejecutados
 
 | Check | Resultado |
@@ -174,7 +193,7 @@ Cinco fallos reales que aparecieron al escribir los tests. Se documentan porque 
 | `npm run format:check` | ✅ 0 |
 | `npm run lint` | ✅ 0 |
 | `npm run typecheck` | ✅ 0 |
-| `npm run test` | ✅ 5 archivos, **122 tests** |
+| `npm run test` | ✅ 5 archivos, **126 tests** |
 | `npm run build` | ✅ main 8.63 kB · preload 195.14 kB · renderer 646.70 kB |
 | `npm run smoke` | ✅ **37/37 checks** en el build real vía CDP |
 

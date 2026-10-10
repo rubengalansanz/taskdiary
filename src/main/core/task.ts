@@ -125,43 +125,52 @@ export function isRecurring(task: Task): boolean {
 }
 
 /**
- * Returns the fields that changed a write must persist.
+ * Fields a partial update is allowed to write.
  *
- * Keeps the SQL `UPDATE` statement and this comparison in sync: the repository iterates
- * the result instead of hand-listing columns, so adding a domain field cannot silently
- * leave it out of the update.
+ * This is the single source of truth for the domain side. `TasksRepository` maps the
+ * same keys to column names through its own `COLUMN_BY_FIELD`, which TypeScript forces
+ * to be a total `Record` over these keys — so adding a `Task` field without a column
+ * mapping is a compile error, not a silent gap.
+ */
+export const WRITABLE_TASK_FIELDS = [
+  'title',
+  'notes',
+  'taskDate',
+  'status',
+  'startMin',
+  'endMin',
+  'estimateMin',
+  'color',
+  'rruleFreq',
+  'rruleInterval',
+  'rruleDays',
+  'rruleUntil',
+  'rruleFrom',
+  'updatedAt',
+  'completedAt'
+] as const satisfies readonly (keyof Omit<Task, 'id' | 'createdAt'>)[]
+
+/** A field a partial update may write. */
+export type WritableTaskField = (typeof WRITABLE_TASK_FIELDS)[number]
+
+/**
+ * Returns the fields that a write must persist.
+ *
+ * Only the fields that actually differ, so the caller can skip the write entirely when
+ * nothing moved.
  *
  * @param current Row as stored.
  * @param next Row as requested.
- * @returns The subset of writable fields that actually differ, excluding `id`.
+ * @returns The subset of writable fields that differ, excluding `id` and `createdAt`.
  */
 export function diffTaskForUpdate(
   current: Task,
   next: Task
 ): Partial<Omit<Task, 'id' | 'createdAt'>> {
-  const writableKeys = [
-    'title',
-    'notes',
-    'taskDate',
-    'status',
-    'startMin',
-    'endMin',
-    'estimateMin',
-    'color',
-    'rruleFreq',
-    'rruleInterval',
-    'rruleDays',
-    'rruleUntil',
-    'rruleFrom',
-    'updatedAt',
-    'completedAt'
-  ] as const satisfies readonly (keyof Task)[]
-
   const changed: Partial<Omit<Task, 'id' | 'createdAt'>> = {}
 
-  for (const key of writableKeys) {
+  for (const key of WRITABLE_TASK_FIELDS) {
     if (!areTaskFieldValuesEqual(current[key], next[key])) {
-      // Safe: every key here is declared writable, so the union it writes to accepts it.
       Object.assign(changed, { [key]: next[key] })
     }
   }

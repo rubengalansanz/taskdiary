@@ -2,10 +2,18 @@ import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { AppError, APP_ERROR_MESSAGES } from '../../core/errors'
 import { toAuditTimestamp } from '../../core/datetime'
-import { diffTaskForUpdate, type RruleFreq, type Task, type TaskStatus } from '../../core/task'
+import {
+  diffTaskForUpdate,
+  WRITABLE_TASK_FIELDS,
+  type RruleFreq,
+  type Task,
+  type TaskStatus,
+  type WritableTaskField
+} from '../../core/task'
 import {
   assertFocusAvailable,
   assertStatusTransition,
+  assertTimeRange,
   normalizeRecurrence,
   type RecurrenceInput
 } from '../../core/validation'
@@ -77,12 +85,14 @@ const TASK_COLUMNS = `
 `.trim()
 
 /**
- * Maps a domain field name to its column name. Total by construction.
+ * Maps a domain field name to its column name.
  *
- * This table is the only place where a field name becomes SQL text, which is what keeps
- * {@link TasksRepository.writeUpdate} free of unvalidated identifiers.
+ * The only place where a field name becomes SQL text, which is what keeps
+ * {@link TasksRepository.writeUpdate} free of unvalidated identifiers. Typed as a total
+ * `Record` over the writable fields: adding a `Task` field without a mapping here is a
+ * compile error rather than a column that silently never gets written.
  */
-const COLUMN_BY_FIELD: Readonly<Record<keyof Omit<Task, 'id'>, string>> = {
+const COLUMN_BY_FIELD: Readonly<Record<WritableTaskField, string>> = {
   title: 'title',
   notes: 'notes',
   taskDate: 'task_date',
@@ -96,35 +106,13 @@ const COLUMN_BY_FIELD: Readonly<Record<keyof Omit<Task, 'id'>, string>> = {
   rruleDays: 'rrule_days',
   rruleUntil: 'rrule_until',
   rruleFrom: 'rrule_from',
-  createdAt: 'created_at',
   updatedAt: 'updated_at',
   completedAt: 'completed_at'
 }
 
-/** Columns a partial update is allowed to write. */
-type WritableField = keyof Omit<Task, 'id' | 'createdAt'>
-
-const WRITABLE_FIELDS: readonly WritableField[] = [
-  'title',
-  'notes',
-  'taskDate',
-  'status',
-  'startMin',
-  'endMin',
-  'estimateMin',
-  'color',
-  'rruleFreq',
-  'rruleInterval',
-  'rruleDays',
-  'rruleUntil',
-  'rruleFrom',
-  'updatedAt',
-  'completedAt'
-]
-
 /** Narrows an arbitrary key to the set of columns an update may write. */
-function isWritableField(key: string): key is WritableField {
-  return (WRITABLE_FIELDS as readonly string[]).includes(key)
+function isWritableField(key: string): key is WritableTaskField {
+  return (WRITABLE_TASK_FIELDS as readonly string[]).includes(key)
 }
 
 /**
@@ -340,9 +328,26 @@ export class TasksRepository {
       status: input.status ?? current.status
     }
 
-    if (content.rruleFreq !== undefined) {
-      Object.assign(candidate, normalizeRecurrence(content as RecurrenceInput))
+    if (content.rruleFreq !== undefined || content.rruleDays !== undefined) {
+      // Merged with the stored rule before validating: sending only `rruleDays` must
+      // not reach the validator as a partial object, or the fields that were omitted
+      // read as `undefined` and fail a check that has nothing to do with the change.
+      Object.assign(
+        candidate,
+        normalizeRecurrence({
+          rruleFreq: content.rruleFreq ?? current.rruleFreq,
+          rruleInterval: content.rruleInterval ?? current.rruleInterval,
+          rruleDays: content.rruleDays ?? current.rruleDays,
+          rruleUntil: content.rruleUntil ?? current.rruleUntil,
+          rruleFrom: content.rruleFrom ?? current.rruleFrom
+        })
+      )
     }
+
+    // The merged range is validated here, not at the IPC boundary, because only this
+    // function can see both ends: an update carrying just `endMin` has to be checked
+    // against the `startMin` already stored.
+    assertTimeRange(candidate.startMin, candidate.endMin)
 
     if (statusChanged && candidate.status === 'in_progress') {
       assertFocusAvailable(candidate, this.findFocusHolder(candidate.taskDate, current.id))
@@ -482,7 +487,14 @@ function toRecurrenceColumns(recurrence: RecurrenceInput): Record<string, unknow
   }
 }
 
-/** Maps a `tasks` row onto the domain model. */
+/**
+ * Maps a `tasks` row onto the domain model.
+ *
+ * The two enum casts are safe by construction, not by trust: `0001_init.sql` declares
+ * `CHECK (status IN (...))` and `CHECK (rrule_freq IN (...))`, so a value outside the
+ * union cannot be stored in the first place. The casts read as unchecked to a reviewer
+ * because the guarantee lives in the schema rather than here — this comment is the link.
+ */
 function toTask(row: TaskRow): Task {
   return {
     id: row.id,

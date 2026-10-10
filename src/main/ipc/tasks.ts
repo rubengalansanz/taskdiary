@@ -1,6 +1,6 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { z } from 'zod'
-import { APP_ERROR_MESSAGES, AppError, toAppErrorDto, type AppErrorDetails } from '../core/errors'
+import { APP_ERROR_MESSAGES, AppError, toAppErrorDto } from '../core/errors'
 import {
   assertEstimateMinutes,
   assertLocalDate,
@@ -23,7 +23,6 @@ import {
   type DeleteTaskRequest,
   type DeleteTaskResultDto,
   type ListTaskRangeRequest,
-  type ListTasksRequest,
   type TaskDto,
   type TaskListResultDto,
   type TaskResultDto,
@@ -305,5 +304,3 @@ export function registerTaskIpcHandlers(repository: TasksRepository): void {
       })
   )
 }
-
-export type { AppErrorDetails, ListTasksRequest }

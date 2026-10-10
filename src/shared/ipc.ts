@@ -14,12 +14,44 @@ import { z } from 'zod'
  */
 
 // ---------------------------------------------------------------------------
+// Limits
+//
+// Declared here, not in `core/validation.ts`: both the Zod schema and the domain rules
+// need them, and `src/main/core/` is allowed to import this module (it imports nothing
+// from Electron) while the reverse would drag the domain into the preload bundle. One
+// list, one set of numbers — a payload can never be "valid" for Zod and "too long" for
+// the domain.
+// ---------------------------------------------------------------------------
+
+/** Maximum length of a task title, in characters. */
+export const MAX_TITLE_LENGTH = 200
+
+/** Maximum length of task notes, in characters. */
+export const MAX_NOTES_LENGTH = 20_000
+
+/** Maximum number of tags attached to a task. Fase 3. */
+export const MAX_TAGS_PER_TASK = 20
+
+/** Maximum length of a tag name, without the leading `#`. Fase 3. */
+export const MAX_TAG_NAME_LENGTH = 40
+
+// ---------------------------------------------------------------------------
 // Reusable field schemas
 // ---------------------------------------------------------------------------
 
 /** A local calendar day, `YYYY-MM-DD`. Shape only; real-date checks live in `core/validation.ts`. */
 export const localDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
   message: 'La fecha debe tener el formato AAAA-MM-DD.'
+})
+
+/** A task title: bounded by {@link MAX_TITLE_LENGTH}, non-blank once trimmed. */
+const titleSchema = z.string().max(MAX_TITLE_LENGTH, {
+  message: `El título no puede superar los ${MAX_TITLE_LENGTH} caracteres.`
+})
+
+/** Free-form notes: bounded by {@link MAX_NOTES_LENGTH}, optional. */
+const notesSchema = z.string().max(MAX_NOTES_LENGTH, {
+  message: `Las notas no pueden superar los ${MAX_NOTES_LENGTH} caracteres.`
 })
 
 /** Minutes since midnight, `0`–`1439`. `null` when the field is unset. */
@@ -57,8 +89,8 @@ export const listTaskRangeRequestSchema = z.object({
 
 /** Request for `task:create`. Every field except `title` and `taskDate` is optional. */
 export const createTaskRequestSchema = z.object({
-  title: z.string().max(500),
-  notes: z.string().max(50_000).nullish(),
+  title: titleSchema,
+  notes: notesSchema.nullish(),
   taskDate: localDateSchema,
   startMin: minuteOfDaySchema.optional(),
   endMin: minuteOfDaySchema.optional(),
@@ -75,8 +107,8 @@ export const createTaskRequestSchema = z.object({
 export const updateTaskRequestSchema = z.object({
   id: taskIdSchema,
   status: taskStatusSchema.optional(),
-  title: z.string().max(500).optional(),
-  notes: z.string().max(50_000).nullish(),
+  title: titleSchema.optional(),
+  notes: notesSchema.nullish(),
   taskDate: localDateSchema.optional(),
   startMin: minuteOfDaySchema.optional(),
   endMin: minuteOfDaySchema.optional(),

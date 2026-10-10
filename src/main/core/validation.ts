@@ -11,12 +11,16 @@
 import { AppError, APP_ERROR_MESSAGES } from './errors'
 import { isValidLocalDate, isValidMinuteOfDay, LOCAL_DATE_PATTERN } from './datetime'
 import { canTransitionTaskStatus, isRecurring, type Task, type TaskStatus } from './task'
+import { MAX_NOTES_LENGTH, MAX_TITLE_LENGTH } from '../../shared/ipc'
 
-/** Maximum length accepted for a task title, matching the plan's `CreateTaskSchema`. */
-export const MAX_TITLE_LENGTH = 200
-
-/** Maximum length accepted for task notes. */
-export const MAX_NOTES_LENGTH = 20_000
+/**
+ * Length limits come from the contract, not from here.
+ *
+ * Re-exported so callers that already import this module keep one obvious entry point,
+ * but `src/shared/ipc.ts` is where the numbers are declared — the Zod schema and the
+ * domain rule must never disagree about what "too long" means.
+ */
+export { MAX_NOTES_LENGTH, MAX_TITLE_LENGTH }
 
 /** Minutes in a day; an estimate cannot exceed a full day. */
 export const MAX_ESTIMATE_MIN = 1440

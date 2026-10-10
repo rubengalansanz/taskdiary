@@ -270,6 +270,42 @@ describe('TasksRepository.update', () => {
   it('throws TASK_NOT_FOUND for an unknown id', () => {
     expect(() => repository.update('no-existe', { title: 'x' })).toThrow(/no existe/i)
   })
+
+  it('validates the merged range, not just the fields the payload carries', () => {
+    // The IPC layer cannot catch this: the update carries only `endMin`, and the
+    // `startMin` that makes it invalid is already in the database. A boundary check
+    // that only looks at what arrived would let 10:00–05:00 through.
+    const created = repository.create(newTask({ startMin: 600, endMin: null }))
+
+    expect(() => repository.update(created.id, { endMin: 300 })).toThrow(
+      /posterior a la hora de inicio/
+    )
+    expect(repository.findById(created.id).endMin).toBeNull()
+  })
+
+  it('accepts an end that lands after the stored start', () => {
+    const created = repository.create(newTask({ startMin: 600, endMin: null }))
+
+    expect(repository.update(created.id, { endMin: 660 }).endMin).toBe(660)
+  })
+
+  it('rejects a start moved past the stored end', () => {
+    const created = repository.create(newTask({ startMin: 540, endMin: 600 }))
+
+    expect(() => repository.update(created.id, { startMin: 660 })).toThrow(
+      /posterior a la hora de inicio/
+    )
+  })
+
+  it('re-validates the recurrence when only the weekday list is sent', () => {
+    const created = repository.create(
+      newTask({ rruleFreq: 'weekly', rruleFrom: TODAY, rruleDays: [1, 2] })
+    )
+
+    // Sending `rruleDays` without `rruleFreq` still changes the rule, so it must still
+    // go through the validator.
+    expect(() => repository.update(created.id, { rruleDays: [0, 9] })).toThrow(/lunes/)
+  })
 })
 
 describe('TasksRepository status machine', () => {
