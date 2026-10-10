@@ -1,0 +1,14 @@
+out
+dist
+pnpm-lock.yaml
+package-lock.json
+LICENSE.md
+tsconfig.json
+tsconfig.*.json
+
+# Hand-written governance documents. Reformatting them would rewrite the plan
+# itself and bury every real change under markdown churn.
+PLAN_IMPLEMENTACION.md
+docs/
+odd/
+session-*.md

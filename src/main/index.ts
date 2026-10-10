@@ -1,0 +1,229 @@
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell } from 'electron'
+import { join } from 'node:path'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import icon from '../../resources/icon.png?asset'
+import { resolveDatabasePath } from './core/database-path'
+import { openDatabase, pingDatabase, readSqliteVersion } from './db/database'
+import { IPC_CHANNELS, type TaskDiaryDbProbeResult } from '../shared/ipc'
+
+/** Size of the Phase 0 window, in device-independent pixels. */
+const WINDOW_WIDTH = 1100
+const WINDOW_HEIGHT = 720
+
+/**
+ * Window and body background colours, used before any CSS is parsed so a dark-mode
+ * user never sees a white flash on startup.
+ */
+const BACKGROUND_COLOR_LIGHT = '#fafafa'
+const BACKGROUND_COLOR_DARK = '#0b0b0c'
+
+/** Absolute path of the SQLite database, resolved once the app is ready. */
+let databasePath = ''
+
+/**
+ * Probes the database and never throws.
+ *
+ * Error-to-payload translation belongs to the IPC layer, which keeps
+ * `src/main/db/` free of any contract type and of any Electron import.
+ */
+function probeDatabaseAt(filePath: string): TaskDiaryDbProbeResult {
+  let database: ReturnType<typeof openDatabase>
+
+  try {
+    database = openDatabase(filePath)
+  } catch (error) {
+    return { ok: false, path: filePath, error: describeError(error) }
+  }
+
+  try {
+    const sqliteVersion = readSqliteVersion(database)
+
+    if (pingDatabase(database) !== 1) {
+      return { ok: false, path: filePath, sqliteVersion, error: 'SELECT 1 did not return 1' }
+    }
+
+    return { ok: true, path: filePath, sqliteVersion }
+  } catch (error) {
+    return { ok: false, path: filePath, error: describeError(error) }
+  } finally {
+    database.close()
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Only `https:` and `mailto:` may ever reach the user's browser or mail client. */
+function isExternalUrlAllowed(url: string): boolean {
+  try {
+    const { protocol } = new URL(url)
+    return protocol === 'https:' || protocol === 'mailto:'
+  } catch {
+    return false
+  }
+}
+
+function registerIpcHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.dbProbe, (): TaskDiaryDbProbeResult => probeDatabaseAt(databasePath))
+
+  ipcMain.handle(IPC_CHANNELS.themeIsDark, (): boolean => nativeTheme.shouldUseDarkColors)
+
+  nativeTheme.on('updated', () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.themeChanged, nativeTheme.shouldUseDarkColors)
+      }
+    }
+  })
+}
+
+/** Minimal application menu. Fase 2 fills in the real entries. */
+function buildApplicationMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Quit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            app.quit()
+          }
+        }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+function createWindow(): BrowserWindow {
+  const backgroundColor = nativeTheme.shouldUseDarkColors
+    ? BACKGROUND_COLOR_DARK
+    : BACKGROUND_COLOR_LIGHT
+
+  const mainWindow = new BrowserWindow({
+    width: WINDOW_WIDTH,
+    height: WINDOW_HEIGHT,
+    show: false,
+    backgroundColor,
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      // Phase 0 security rules, no exceptions: the renderer has no Node capability.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show()
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow.destroy()
+  })
+
+  // External links open in the user's browser; everything else is denied.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrlAllowed(url)) {
+      void shell.openExternal(url)
+    }
+
+    return { action: 'deny' }
+  })
+
+  // The renderer may never navigate away from the app itself.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = mainWindow.webContents.getURL()
+
+    if (url !== currentUrl) {
+      event.preventDefault()
+    }
+  })
+
+  // No device access at all: TaskDiary needs no camera, microphone or geolocation.
+  mainWindow.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
+    callback(false)
+  })
+  mainWindow.webContents.session.setPermissionCheckHandler(() => false)
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  return mainWindow
+}
+
+// A second instance would fight over the same SQLite file: hand focus back instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const [existingWindow] = BrowserWindow.getAllWindows()
+
+    if (!existingWindow) {
+      createWindow()
+      return
+    }
+
+    if (existingWindow.isMinimized()) {
+      existingWindow.restore()
+    }
+
+    existingWindow.focus()
+  })
+
+  void app.whenReady().then(() => {
+    electronApp.setAppUserModelId('com.local.taskdiary')
+
+    // Dev-only convenience: F12 / CmdOrCtrl+R shortcuts.
+    app.on('browser-window-created', (_event, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
+
+    databasePath = resolveDatabasePath(app.getPath('userData'))
+    const probe = probeDatabaseAt(databasePath)
+
+    if (!probe.ok) {
+      console.error(`[database] could not open ${probe.path}: ${probe.error}`)
+      app.quit()
+      return
+    }
+
+    console.log(`[database] ${probe.path} (SQLite ${probe.sqliteVersion}) SELECT 1 -> 1`)
+
+    buildApplicationMenu()
+    registerIpcHandlers()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+      }
+    })
+  })
+}
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})

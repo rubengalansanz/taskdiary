@@ -1,0 +1,47 @@
+appId: com.local.taskdiary
+productName: taskdiary
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+win:
+  executableName: taskdiary
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    # No camera or microphone entries on purpose: the main process denies every
+    # permission request, and declaring a usage string for a capability the app
+    # never exercises only widens the App Store privacy surface.
+    - NSDocumentsFolderUsageDescription: Application reads and writes task exports in the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application reads and writes task exports in the user's Downloads folder.
+  notarize: false
+dmg:
+  artifactName: ${name}-${version}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+  maintainer: TaskDiary
+  category: Utility
+appImage:
+  artifactName: ${name}-${version}.${ext}
+# N-API: the prebuilt better-sqlite3 binary serves Node and Electron alike, so no
+# rebuild is needed on developer machines. CI runs `install-app-deps` before packing.
+npmRebuild: false
+# GitHub Releases feed, matching PLAN_IMPLEMENTACION.md §10. Fase 9 adds signing.
+publish:
+  provider: github
+  owner: rubengalansanz
+  repo: taskdiary

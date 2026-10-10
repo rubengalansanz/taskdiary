@@ -1,0 +1,40 @@
+# Carpetas ocultas
+.atl/
+.codegraph/
+.vscode/
+
+# Ficheros ocultos
+.gga
+
+# Ficheros Markdown
+AGENTS.md
+# El plan de implementación, en cambio, SÍ se versiona (§0.1, pendiente 1):
+# es el documento que gobierna el trabajo y sin él el repo no explica sus decisiones.
+# PLAN_IMPLEMENTACION.md  ← versionado a propósito
+
+# Ficheros JSON y JSONC
+opencode.jsonc
+
+# Dependencias y artefactos de build
+node_modules/
+dist/
+out/
+release/
+*.tsbuildinfo
+.env
+.env.local
+
+# Ruido del sistema y del toolchain
+.DS_Store
+Thumbs.db
+.eslintcache
+*.log*
+test-results/
+playwright-report/
+coverage/
+
+# Husky (Fase 8)
+.husky/_
+
+# Sesiones
+session-*
