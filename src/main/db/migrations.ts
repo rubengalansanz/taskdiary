@@ -19,6 +19,7 @@
  */
 
 import migration0001 from '../../../migrations/0001_init.sql?raw'
+import migration0002 from '../../../migrations/0002_started_at.sql?raw'
 
 /** One numbered schema migration. */
 export interface Migration {
@@ -34,7 +35,10 @@ export interface Migration {
  * The array index + 1 is the resulting `PRAGMA user_version`, so the list order *is* the
  * schema version. Appending is safe; reordering or removing an entry is not.
  */
-export const MIGRATIONS: readonly Migration[] = [{ id: '0001_init', sql: migration0001 }]
+export const MIGRATIONS: readonly Migration[] = [
+  { id: '0001_init', sql: migration0001 },
+  { id: '0002_started_at', sql: migration0002 }
+]
 
 /**
  * Schema version this build expects.

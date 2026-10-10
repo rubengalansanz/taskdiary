@@ -315,6 +315,49 @@ describe('TasksRepository status machine', () => {
     expect(repository.update(created.id, { status: 'in_progress' }).status).toBe('in_progress')
   })
 
+  it('stamps started_at the moment the task becomes in_progress', async () => {
+    const created = repository.create(newTask())
+
+    expect(created.startedAt).toBeNull()
+
+    await tick()
+
+    const running = repository.update(created.id, { status: 'in_progress' })
+
+    expect(running.startedAt).not.toBeNull()
+    expect(Date.parse(running.startedAt ?? '')).toBeGreaterThan(Date.parse(created.updatedAt))
+  })
+
+  it('keeps started_at across unrelated edits to a running task', async () => {
+    const created = repository.create(newTask())
+    const running = repository.update(created.id, { status: 'in_progress' })
+
+    await tick()
+
+    // The whole point of 0002: renaming a running task must not reset the stopwatch.
+    const renamed = repository.update(created.id, { title: 'Otro nombre' })
+
+    expect(renamed.startedAt).toBe(running.startedAt)
+  })
+
+  it('clears started_at when the task stops running', () => {
+    const created = repository.create(newTask())
+    repository.update(created.id, { status: 'in_progress' })
+
+    expect(repository.update(created.id, { status: 'done' }).startedAt).toBeNull()
+  })
+
+  it('gives a fresh start when a task resumes later', async () => {
+    const created = repository.create(newTask())
+    const first = repository.update(created.id, { status: 'in_progress' })
+
+    repository.update(created.id, { status: 'pending' })
+    await tick()
+    const second = repository.update(created.id, { status: 'in_progress' })
+
+    expect(second.startedAt).not.toBe(first.startedAt)
+  })
+
   it('stamps completed_at the first time a task reaches done', () => {
     const created = repository.create(newTask())
 

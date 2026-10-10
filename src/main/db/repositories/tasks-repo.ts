@@ -50,6 +50,7 @@ interface TaskRow {
   rrule_from: string | null
   created_at: string
   updated_at: string
+  started_at: string | null
   completed_at: string | null
 }
 
@@ -81,7 +82,7 @@ export interface UpdateTaskInput extends Partial<NewTaskInput> {
 const TASK_COLUMNS = `
   id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
   rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-  created_at, updated_at, completed_at
+  created_at, updated_at, started_at, completed_at
 `.trim()
 
 /**
@@ -107,6 +108,7 @@ const COLUMN_BY_FIELD: Readonly<Record<WritableTaskField, string>> = {
   rruleUntil: 'rrule_until',
   rruleFrom: 'rrule_from',
   updatedAt: 'updated_at',
+  startedAt: 'started_at',
   completedAt: 'completed_at'
 }
 
@@ -267,11 +269,11 @@ export class TasksRepository {
         `INSERT INTO tasks (
            id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
            rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-           created_at, updated_at, completed_at
+           created_at, updated_at, started_at, completed_at
          ) VALUES (
            @id, @title, @notes, @taskDate, 'pending', @startMin, @endMin, @estimateMin, @color,
            @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
-           @createdAt, @updatedAt, NULL
+           @createdAt, @updatedAt, NULL, NULL
          )`
       )
       .run({
@@ -369,6 +371,11 @@ export class TasksRepository {
       statusChanged ? input.status : undefined,
       now
     )
+    changed.startedAt = resolveStartedAt(
+      current.startedAt,
+      statusChanged ? input.status : undefined,
+      now
+    )
 
     this.writeUpdate(id, changed)
 
@@ -463,6 +470,33 @@ function resolveCompletedAt(
   return nextStatus === 'done' ? (current ?? now) : null
 }
 
+/**
+ * Decides the new `started_at` value.
+ *
+ * Stamped the moment a task becomes `in_progress` and cleared the moment it stops being
+ * one. A task that returns to `in_progress` later gets a fresh start: the previous
+ * stretch of work genuinely ended, and pretending otherwise would inflate the day.
+ *
+ * `updated_at` cannot serve this purpose — editing a running task's title would reset
+ * the stopwatch, which is exactly the bug `0002_started_at` exists to prevent.
+ *
+ * @param current Stored start timestamp.
+ * @param nextStatus Requested status, or `undefined` when the update does not touch it.
+ * @param now Timestamp to stamp.
+ * @returns The value to persist.
+ */
+function resolveStartedAt(
+  current: string | null,
+  nextStatus: TaskStatus | undefined,
+  now: string
+): string | null {
+  if (nextStatus === undefined) {
+    return current
+  }
+
+  return nextStatus === 'in_progress' ? now : null
+}
+
 /** Strips `undefined` keys so a partial update never writes `undefined` into a column. */
 function definedOnly(input: Partial<NewTaskInput>): Partial<NewTaskInput> {
   const result: Partial<NewTaskInput> = {}
@@ -513,6 +547,7 @@ function toTask(row: TaskRow): Task {
     rruleFrom: row.rrule_from,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    startedAt: row.started_at,
     completedAt: row.completed_at
   }
 }

@@ -274,6 +274,7 @@ CREATE TABLE tasks (
   -- auditoría
   created_at     TEXT NOT NULL,             -- ISO-8601 UTC
   updated_at     TEXT NOT NULL,             -- ISO-8601 UTC
+  started_at     TEXT,                      -- ISO-8601 UTC: cuándo pasó a in_progress
   completed_at   TEXT                       -- ISO-8601 UTC o NULL
 );
 
@@ -356,6 +357,7 @@ export interface TaskDto {
   rruleFrom: string | null;
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
   completedAt: string | null;
 }
 
@@ -409,7 +411,12 @@ Ventajas: editar "toda la serie" o "solo esta ocurrencia" es una única operaci�
 - `task_date` se almacena como **fecha local** (`YYYY-MM-DD`), nunca como instante UTC.
 - Las horas se guardan como **minutos desde medianoche** (enteros): comparables, sin objetos `Date`, sin errores de horario de verano.
 - Los días de la semana en `rrule_days` siguen la convención ISO: **lunes = 1**.
-- El timestamp ISO-8601 en UTC se usa solo en `created_at`, `updated_at` y `completed_at`.
+- El timestamp ISO-8601 en UTC se usa solo en `created_at`, `updated_at`, `started_at` y
+  `completed_at`.
+- `started_at` es distinto de `updated_at` a propósito: el cronómetro en vivo necesita saber
+  **cuándo empezó el trabajo**. Reutilizar `updated_at` haría que editar el título de una
+  tarea en curso reiniciase el reloj. Se añadió en la migración `0002`, porque §7.1 se
+  escribió antes de que la Fase 2 exigiera el cronómetro.
 
 ---
 

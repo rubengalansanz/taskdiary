@@ -5,9 +5,18 @@ import { z } from 'zod'
  *
  * This module is the single source of truth for channels and payloads (plan rule §2.4).
  * It is deliberately dependency-free apart from Zod — no Electron, no Node built-ins — so
- * all three build targets can import it. The renderer never imports it at runtime: the
- * ambient `window.taskDiary` declaration in `src/preload/index.d.ts` re-publishes these
- * shapes as globals.
+ * all three build targets can import it.
+ *
+ * Two kinds of import live here, and the distinction matters:
+ *
+ * - **Types** the renderer needs at compile time (`TaskDto`, `TaskStatusDto`) are *not*
+ *   imported by renderer code. It cannot reach them: the ambient `window.taskDiary`
+ *   declaration in `src/preload/index.d.ts` re-publishes them as globals.
+ * - **Values** — the Zod schemas — *are* imported at runtime, by the task form and by the
+ *   API layer. That is deliberate: running the same schema in the renderer before the
+ *   round trip is what makes the two validation layers provably identical instead of two
+ *   copies that drift. It stays safe because this module pulls in nothing privileged, so
+ *   importing it grants the renderer no capability it did not already have.
  *
  * Adding a channel means adding it here, adding a Zod schema, and registering a handler.
  * Nothing else grants the renderer a capability.
@@ -154,6 +163,7 @@ export const taskSchema = z.object({
   rruleFrom: localDateSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  startedAt: z.string().nullable(),
   completedAt: z.string().nullable()
 })
 
@@ -275,7 +285,23 @@ export const IPC_CHANNELS = {
   /** Phase 1: delete a task. */
   taskDelete: 'taskdiary:task:delete',
   /** Phase 2: move a task through the state machine. */
-  taskSetStatus: 'taskdiary:task:set-status'
+  taskSetStatus: 'taskdiary:task:set-status',
+  /**
+   * Phase 2: channels the native menu uses to reach the renderer.
+   *
+   * Menu accelerators fire even when the focus is outside the page — inside a dialog, or
+   * nowhere at all — so they cannot live only in the renderer. They carry no payload: the
+   * renderer owns what "new task" means on the current day.
+   */
+  menuNewTask: 'taskdiary:menu:new-task',
+  /** Jump to today. */
+  menuToday: 'taskdiary:menu:go-today',
+  /** Go to the previous day. */
+  menuPreviousDay: 'taskdiary:menu:previous-day',
+  /** Go to the next day. */
+  menuNextDay: 'taskdiary:menu:next-day',
+  /** Complete the selected task. */
+  menuCompleteSelected: 'taskdiary:menu:complete-selected'
 } as const
 
 /** Name of any channel in {@link IPC_CHANNELS}. */
@@ -313,6 +339,51 @@ export interface TaskDiaryThemeApi {
   onChange(callback: (isDark: boolean) => void): () => void
 }
 
+/**
+ * Commands the native menu pushes to the renderer when an accelerator fires.
+ *
+ * Derived from {@link IPC_CHANNELS} rather than written out: a literal copy would still
+ * typecheck after a channel was renamed, and `isMenuCommand` would then silently stop
+ * matching a channel the main process still sends.
+ */
+export const MENU_COMMAND_CHANNELS = [
+  IPC_CHANNELS.menuNewTask,
+  IPC_CHANNELS.menuToday,
+  IPC_CHANNELS.menuPreviousDay,
+  IPC_CHANNELS.menuNextDay,
+  IPC_CHANNELS.menuCompleteSelected
+] as const
+
+/** Name of a command the native menu can push. */
+export type MenuCommand = (typeof MENU_COMMAND_CHANNELS)[number]
+
+/**
+ * Reports whether a pushed channel is one this build knows about.
+ *
+ * @param channel Value received from the main process.
+ * @returns True when it names a command declared in {@link MENU_COMMAND_CHANNELS}.
+ */
+export function isMenuCommand(channel: unknown): channel is MenuCommand {
+  return (
+    typeof channel === 'string' && (MENU_COMMAND_CHANNELS as readonly string[]).includes(channel)
+  )
+}
+
+/** Bridge for the native menu's accelerator commands. */
+export interface TaskDiaryMenuApi {
+  /**
+   * Subscribes to accelerator commands from the main process.
+   *
+   * Filters against the known command list before handing anything to the renderer: the
+   * preload cannot know what the main process will send, so it checks rather than
+   * forwards whatever arrives.
+   *
+   * @param callback Invoked with the command name.
+   * @returns An unsubscribe function.
+   */
+  onCommand(callback: (command: MenuCommand) => void): () => void
+}
+
 /** The single API exposed to the renderer through `contextBridge`. */
 export interface TaskDiaryApi {
   /** Phase 0 database diagnostics. */
@@ -321,6 +392,8 @@ export interface TaskDiaryApi {
   }
   /** Phase 1 task CRUD. */
   tasks: TaskApi
+  /** Phase 2 native menu accelerators. */
+  menu: TaskDiaryMenuApi
   /** Light/dark theme bridge. */
   theme: TaskDiaryThemeApi
 }

@@ -87,32 +87,90 @@ function registerIpcHandlers(): void {
   })
 }
 
-/** Minimal application menu. Fase 2 fills in the real entries. */
+/**
+ * Menu commands, taken from the contract so both sides name the same strings.
+ *
+ * The accelerators live in the menu rather than only in the renderer because a menu
+ * accelerator fires even when the focus is outside the page — in a dialog, or nowhere at
+ * all. The items do not perform the work themselves: they send a message the renderer
+ * interprets, which keeps every write behind the bridge.
+ */
+const MENU_CHANNEL = {
+  newTask: IPC_CHANNELS.menuNewTask,
+  today: IPC_CHANNELS.menuToday,
+  previousDay: IPC_CHANNELS.menuPreviousDay,
+  nextDay: IPC_CHANNELS.menuNextDay,
+  completeSelected: IPC_CHANNELS.menuCompleteSelected
+} as const
+
+function sendMenuCommand(channel: string): void {
+  const [window] = BrowserWindow.getAllWindows()
+
+  if (window !== undefined && !window.isDestroyed()) {
+    window.webContents.send(channel)
+  }
+}
+
 function buildApplicationMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: 'File',
+      label: 'Archivo',
       submenu: [
         {
-          label: 'Quit',
-          accelerator: 'CmdOrCtrl+Q',
-          click: () => {
-            app.quit()
-          }
+          label: 'Nueva tarea',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => sendMenuCommand(MENU_CHANNEL.newTask)
+        },
+        { type: 'separator' },
+        { role: is.dev ? 'reload' : 'forceReload' },
+        { role: is.dev ? 'toggleDevTools' : 'togglefullscreen' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Salir' }
+      ]
+    },
+    {
+      label: 'Editar',
+      submenu: [
+        {
+          label: 'Completar tarea seleccionada',
+          accelerator: 'CmdOrCtrl+Return',
+          click: () => sendMenuCommand(MENU_CHANNEL.completeSelected)
+        },
+        { type: 'separator' },
+        { role: 'cut', label: 'Cortar' },
+        { role: 'copy', label: 'Copiar' },
+        { role: 'paste', label: 'Pegar' },
+        { role: 'selectAll', label: 'Seleccionar todo' }
+      ]
+    },
+    {
+      label: 'Ir',
+      submenu: [
+        {
+          label: 'Día anterior',
+          accelerator: 'CmdOrCtrl+Left',
+          click: () => sendMenuCommand(MENU_CHANNEL.previousDay)
+        },
+        {
+          label: 'Día siguiente',
+          accelerator: 'CmdOrCtrl+Right',
+          click: () => sendMenuCommand(MENU_CHANNEL.nextDay)
+        },
+        {
+          label: 'Hoy',
+          accelerator: 'CmdOrCtrl+T',
+          click: () => sendMenuCommand(MENU_CHANNEL.today)
         }
       ]
     },
     {
-      label: 'View',
+      label: 'Ver',
       submenu: [
-        { role: 'reload' },
-        { role: 'toggleDevTools' },
+        { role: 'resetZoom', label: 'Zoom original' },
+        { role: 'zoomIn', label: 'Acercar' },
+        { role: 'zoomOut', label: 'Alejar' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
+        { role: 'togglefullscreen', label: 'Pantalla completa' }
       ]
     }
   ]

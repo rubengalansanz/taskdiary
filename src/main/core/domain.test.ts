@@ -426,6 +426,7 @@ function buildTask(): Task {
     rruleFrom: null,
     createdAt: '2026-10-10T08:00:00.000Z',
     updatedAt: '2026-10-10T08:00:00.000Z',
+    startedAt: null,
     completedAt: null
   }
 }

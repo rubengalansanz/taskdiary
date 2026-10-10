@@ -1,66 +1,61 @@
 import * as React from 'react'
+import { cva, type VariantProps } from 'class-variance-authority'
+import { cn } from '@/lib/utils'
+import { Slot } from 'radix-ui'
 
-/**
- * Phase 0 stand-in for the shadcn/ui `button` component.
- *
- * The canonical registry version (https://ui.shadcn.com/r/styles/new-york/button.json)
- * depends on `@radix-ui/react-slot`, `class-variance-authority` and `@/lib/utils`
- * (clsx + tailwind-merge). Those packages are not in the Phase 0 pinned matrix and
- * `src/renderer/src/lib/utils.ts` is outside the authorized edit surface, so the
- * shadcn CLI could not be used for Phase 0.
- *
- * The class strings, the exported `buttonVariants` shape and the `data-slot`
- * attribute below are copied from the registry so that Fase 2 can replace this file
- * with `npx shadcn add button` without touching any call site.
- */
+const buttonVariants = cva(
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  {
+    variants: {
+      variant: {
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        destructive:
+          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40',
+        outline:
+          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+        ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
+        link: 'text-primary underline-offset-4 hover:underline'
+      },
+      size: {
+        default: 'h-9 px-4 py-2 has-[>svg]:px-3',
+        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: 'h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5',
+        lg: 'h-10 rounded-md px-6 has-[>svg]:px-4',
+        icon: 'size-9',
+        'icon-xs': "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
+        'icon-sm': 'size-8',
+        'icon-lg': 'size-10'
+      }
+    },
+    defaultVariants: {
+      variant: 'default',
+      size: 'default'
+    }
+  }
+)
 
-const BUTTON_BASE_CLASSES =
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0'
-
-const VARIANT_CLASSES = {
-  default: 'bg-primary text-primary-foreground shadow hover:bg-primary/90',
-  destructive: 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-  outline:
-    'border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground',
-  secondary: 'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
-  ghost: 'hover:bg-accent hover:text-accent-foreground',
-  link: 'text-primary underline-offset-4 hover:underline'
-} as const
-
-const SIZE_CLASSES = {
-  default: 'h-9 px-4 py-2',
-  sm: 'h-8 rounded-md px-3 text-xs',
-  lg: 'h-10 rounded-md px-8',
-  icon: 'h-9 w-9'
-} as const
-
-export type ButtonVariant = keyof typeof VARIANT_CLASSES
-export type ButtonSize = keyof typeof SIZE_CLASSES
-
-/** Class-name resolver kept API-compatible with shadcn's `buttonVariants`. */
-export function buttonVariants({
+function Button({
+  className,
   variant = 'default',
-  size = 'default'
-}: { variant?: ButtonVariant; size?: ButtonSize } = {}): string {
-  return [BUTTON_BASE_CLASSES, VARIANT_CLASSES[variant], SIZE_CLASSES[size]].join(' ')
-}
+  size = 'default',
+  asChild = false,
+  ...props
+}: React.ComponentProps<'button'> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const Comp = asChild ? Slot.Root : 'button'
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant
-  size?: ButtonSize
-}
-
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, type = 'button', ...props }, ref) => (
-    <button
-      ref={ref}
-      type={type}
+  return (
+    <Comp
       data-slot="button"
-      className={[buttonVariants({ variant, size }), className].filter(Boolean).join(' ')}
+      data-variant={variant}
+      data-size={size}
+      className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
   )
-)
-Button.displayName = 'Button'
+}
 
-export { Button }
+export { Button, buttonVariants }

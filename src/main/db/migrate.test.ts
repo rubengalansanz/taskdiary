@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openInMemoryDatabase, hasTable, pingDatabase } from './database'
 import { readSchemaVersion, runMigrations } from './migrate'
-import { latestSchemaVersion } from './migrations'
+import { MIGRATIONS, latestSchemaVersion } from './migrations'
 import type Database from 'better-sqlite3'
 
 /**
@@ -37,6 +37,39 @@ describe('runMigrations', () => {
     for (const table of ['tasks', 'tags', 'task_tags', 'settings']) {
       expect(hasTable(database, table), `missing table ${table}`).toBe(true)
     }
+  })
+
+  it('adds started_at without touching rows that already exist', () => {
+    // Migrate to v1 only, insert a row, then apply v2 the way a real upgrade would.
+    const partial = database.transaction(() => {
+      database.exec(MIGRATIONS[0]?.sql ?? '')
+      database.pragma('user_version = 1')
+      database
+        .prepare(
+          `INSERT INTO tasks (id, title, task_date, status, rrule_freq, rrule_interval,
+             created_at, updated_at)
+           VALUES ('a', 'Existente', '2026-10-10', 'pending', 'none', 1,
+             '2026-10-10T08:00:00.000Z', '2026-10-10T08:00:00.000Z')`
+        )
+        .run()
+    })
+
+    partial()
+
+    expect(hasStartedAtColumn(database)).toBe(false)
+
+    runMigrations(database)
+
+    expect(hasStartedAtColumn(database)).toBe(true)
+
+    const row = database.prepare('SELECT title, started_at FROM tasks WHERE id = ?').get('a') as {
+      title: string
+      started_at: string | null
+    }
+
+    expect(row.title).toBe('Existente')
+    // Nobody knows when an already-running task started; inventing a value would be a lie.
+    expect(row.started_at).toBeNull()
   })
 
   it('is idempotent: running twice applies nothing the second time', () => {
@@ -110,6 +143,13 @@ describe('runMigrations', () => {
     expect(pingDatabase(database)).toBe(1)
   })
 })
+
+/** Reports whether a column exists, the way an upgrade has to check before altering. */
+function hasStartedAtColumn(target: Database.Database): boolean {
+  const columns = target.pragma('table_info(tasks)') as { name: string }[]
+
+  return columns.some((column) => column.name === 'started_at')
+}
 
 /** Bypasses the repository to prove the *schema* enforces a rule, not the application. */
 function insertRawTask(

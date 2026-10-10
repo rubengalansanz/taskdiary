@@ -9,7 +9,7 @@
  * Usage: node scripts/fase1-smoke.mjs
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -91,6 +91,17 @@ const electron = join(
   process.platform === 'win32' ? 'electron.exe' : 'electron'
 )
 
+/**
+ * Expected schema version, counted from the migration files on disk.
+ *
+ * Reading it from the repo rather than hard-coding a number is the point: a literal would
+ * have kept saying "1" after Fase 2 added `0002`, and this check would have reported a
+ * perfectly healthy database as broken.
+ */
+const expectedSchemaVersion = readdirSync(join(repoRoot, 'migrations')).filter((name) =>
+  name.endsWith('.sql')
+).length
+
 console.log(`userData: ${userDataDir}\n`)
 
 const child = spawn(
@@ -149,7 +160,14 @@ try {
   // --- Probe now reports the real schema, not just SELECT 1 ----------------------
   const probe = await evaluate(socketUrl, 'window.taskDiary.db.probe()')
   check('probe ok', probe.ok === true, probe.error ?? '')
-  check('schema version is 1', probe.schemaVersion === 1, String(probe.schemaVersion))
+  // The expected version is whatever the bundled migrations declare, not a literal:
+  // Fase 2 added 0002_started_at, and hard-coding the number here would have made this
+  // check lie about a healthy database.
+  check(
+    'schema version matches the bundled migrations',
+    probe.schemaVersion === expectedSchemaVersion,
+    `got ${probe.schemaVersion}, expected ${expectedSchemaVersion}`
+  )
   check('tasks table exists after migrations', probe.hasTasksTable === true)
 
   // --- CRUD round trip through the real bridge ------------------------------------

@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import {
   IPC_CHANNELS,
+  isMenuCommand,
+  MENU_COMMAND_CHANNELS,
   type IpcChannel,
   type TaskDiaryApi,
   type TaskDiaryDbProbeResult
@@ -59,12 +61,35 @@ const tasks: TaskDiaryApi['tasks'] = {
   setStatus: (request) => invoke(IPC_CHANNELS.taskSetStatus, request)
 }
 
+const menu: TaskDiaryApi['menu'] = {
+  onCommand: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, command: unknown): void => {
+      // The preload cannot know in advance what the main process will send on this
+      // channel, so it validates instead of forwarding whatever arrives.
+      if (isMenuCommand(command)) {
+        callback(command)
+      }
+    }
+
+    for (const channel of MENU_COMMAND_CHANNELS) {
+      ipcRenderer.on(channel, listener)
+    }
+
+    return (): void => {
+      for (const channel of MENU_COMMAND_CHANNELS) {
+        ipcRenderer.removeListener(channel, listener)
+      }
+    }
+  }
+}
+
 const taskDiary: TaskDiaryApi = {
   db: {
     probe: (): Promise<TaskDiaryDbProbeResult> =>
       invoke<TaskDiaryDbProbeResult>(IPC_CHANNELS.dbProbe)
   },
   tasks,
+  menu,
   theme
 }
 

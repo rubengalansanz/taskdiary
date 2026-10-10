@@ -11,6 +11,7 @@ import tailwindcss from '@tailwindcss/vite'
  * dragging main-process code into the renderer bundle.
  */
 const alias = {
+  '@': resolve('src/renderer/src'),
   '@main': resolve('src/main'),
   '@renderer': resolve('src/renderer/src'),
   '@shared': resolve('src/shared')

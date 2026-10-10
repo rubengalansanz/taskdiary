@@ -120,14 +120,24 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ### Fase 2 · Vista Día — 1,5 días
 
-- [ ] `useTasks` con caché en memoria e invalidación por IPC
-- [ ] `TitleBar` con navegación de fecha y selector de vista
-- [ ] `TaskList` + `TaskRow` con los 4 estados
-- [ ] `TaskForm` en modal (crear y editar)
-- [ ] Regla de foco: solo una tarea `in_progress` (transición validada en `core`)
-- [ ] Cronómetro en vivo de la tarea en curso
-- [ ] Menú nativo con los atajos globales de la app
-- [ ] Atajos `Ctrl+N`, `Ctrl+Enter`, `Ctrl+←/→`, `Ctrl+T`, `Esc`
+- [x] `useTasks` con caché en memoria e invalidación por IPC
+- [x] `TitleBar` con navegación de fecha y selector de vista
+- [x] `TaskList` + `TaskRow` con los 4 estados
+- [x] `TaskForm` en modal (crear y editar)
+- [x] Regla de foco: solo una tarea `in_progress` (transición validada en `core`)
+- [x] Cronómetro en vivo de la tarea en curso
+- [x] Menú nativo con los atajos globales de la app
+- [x] Atajos `Ctrl+N`, `Ctrl+Enter`, `Ctrl+←/→`, `Ctrl+T`, `Esc`
+
+> **Desviaciones documentadas.** (1) **La fecha vive en la URL** (`#/day/AAAA-MM-DD`), no
+> en Zustand: el plan se contradice entre §8/§5.2 y §2.6/ADR-006, y con la fecha en la URL
+> el botón atrás del sistema recorre los días sin código adicional. Decidido con el usuario
+> el 2026-10-10. (2) **`started_at`** se añadió en `0002_started_at.sql`, no en `0001`:
+> el cronómetro lo necesita, `updated_at` no sirve porque editar el título de una tarea en
+> curso reiniciaría el reloj, y §2.8 prohíbe editar una migración publicada. El plan maestro
+> §7.1 y §7.3 se corrigieron. (3) **shadcn/ui pasa a componentes reales** con Radix: el
+> `button` de Fase 0 era un stand-in porque faltaban las dependencias, y un modal de verdad
+> necesita trampa de foco y roles ARIA.
 
 **Entregable:** el 80 % del valor del producto ya funciona.
 
@@ -358,6 +368,9 @@ Definidas **30 días después de instalar la v1.0**.
 | ADR-013 | Las migraciones se importan como strings (`?raw`), no se leen del disco | Aceptada (Fase 1) |
 | ADR-014 | `done` es terminal: ninguna transición sale de él, ni en dos pasos | Aceptada (Fase 1) |
 | ADR-015 | La UI y los mensajes de error van en español; identificadores y comentarios en inglés | Aceptada (Fase 1) |
+| ADR-016 | La fecha seleccionada vive en la URL (`#/day/:date`), no en Zustand | Aceptada (Fase 2) |
+| ADR-017 | La caché de tareas es un store externo con `useSyncExternalStore`, no estado de Zustand | Aceptada (Fase 2) |
+| ADR-018 | `started_at` se añade en `0002`; `0001` no se edita (§2.8) | Aceptada (Fase 2) |
 
 ---
 

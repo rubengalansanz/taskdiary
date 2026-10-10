@@ -54,6 +54,13 @@ export interface Task {
   createdAt: string
   /** ISO-8601 UTC last-modification timestamp. */
   updatedAt: string
+  /**
+   * ISO-8601 UTC instant the task entered `in_progress`, or `null`.
+   *
+   * Distinct from `updatedAt` on purpose: a live stopwatch needs the moment work began,
+   * and every later edit to the title would otherwise reset it. Added by `0002`.
+   */
+  startedAt: string | null
   /** ISO-8601 UTC completion timestamp, or `null` while not done. */
   completedAt: string | null
 }
@@ -147,6 +154,7 @@ export const WRITABLE_TASK_FIELDS = [
   'rruleUntil',
   'rruleFrom',
   'updatedAt',
+  'startedAt',
   'completedAt'
 ] as const satisfies readonly (keyof Omit<Task, 'id' | 'createdAt'>)[]
 
