@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react'
 import { Button } from './components/ui/button'
 
 /**
- * Phase 0 smoke screen.
+ * Phase 1 smoke screen.
  *
- * Proves the three foundation contracts are live: Tailwind and the theme tokens are
- * applied, `window.taskDiary` crosses the context bridge, and the main process owns
- * a working SQLite connection. Task UI starts in Fase 1.
+ * There is no task UI yet — `TaskList`, `TaskForm` and `TitleBar` are Fase 2. What this
+ * screen does is show, live, that the whole foundation is real rather than declared:
+ * the theme tokens are applied, `window.taskDiary` crosses the context bridge, and the
+ * main process owns a migrated SQLite database with a real `tasks` table.
+ *
+ * Copy is Spanish because that is what the user reads (ADR-015); identifiers and
+ * comments stay English.
  */
 
-const CURRENT_VIEW = 'Phase 0 · Foundations'
+const CURRENT_PHASE = 'Fase 1 · Datos'
 
 function useDbProbe(): { probe: TaskDiaryDbProbeResult | null; error: string | null } {
   const [probe, setProbe] = useState<TaskDiaryDbProbeResult | null>(null)
@@ -37,7 +41,7 @@ function useDbProbe(): { probe: TaskDiaryDbProbeResult | null; error: string | n
 
 function Row({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
-    <div className="grid grid-cols-[9rem_1fr] gap-4 border-b border-border py-2 last:border-b-0">
+    <div className="grid grid-cols-[11rem_1fr] gap-4 border-b border-border py-2 last:border-b-0">
       <span className="text-muted-foreground text-sm">{label}</span>
       <span className="font-mono text-sm break-all">{value}</span>
     </div>
@@ -53,33 +57,48 @@ function App(): React.JSX.Element {
       <header className="space-y-2 text-center">
         <h1 className="text-3xl font-semibold tracking-tight">TaskDiary</h1>
         <p className="text-muted-foreground text-sm">
-          Offline-first desktop diary to log and review daily tasks
+          Diario de tareas offline: registre y revise su día
         </p>
       </header>
 
       <section className="bg-card text-card-foreground w-full max-w-2xl rounded-lg border p-6 shadow-sm">
-        <h2 className="mb-4 text-lg font-medium">{CURRENT_VIEW}</h2>
+        <h2 className="mb-4 text-lg font-medium">{CURRENT_PHASE}</h2>
 
-        <Row label="View" value={CURRENT_VIEW} />
-        <Row label="Theme" value={isDark ? 'dark' : 'light'} />
+        <Row label="Vista" value={CURRENT_PHASE} />
+        <Row label="Tema" value={isDark ? 'oscuro' : 'claro'} />
 
-        {error !== null && <Row label="Bridge error" value={error} />}
+        {error !== null && <Row label="Error del puente" value={error} />}
 
-        {probe === null && error === null && <Row label="Database" value="probing…" />}
+        {probe === null && error === null && <Row label="Base de datos" value="comprobando…" />}
 
         {probe !== null && (
           <>
-            <Row label="Database" value={probe.ok ? 'opened' : 'failed'} />
-            <Row label="Path" value={probe.path} />
-            <Row label="SELECT 1" value={probe.ok ? '1' : (probe.error ?? 'no response')} />
-            <Row label="SQLite" value={probe.sqliteVersion ?? 'unknown'} />
+            <Row label="Base de datos" value={probe.ok ? 'abierta' : 'fallida'} />
+            <Row label="Ruta" value={probe.path} />
+            <Row label="SELECT 1" value={probe.ok ? '1' : (probe.error ?? 'sin respuesta')} />
+            <Row label="SQLite" value={probe.sqliteVersion ?? 'desconocida'} />
+            <Row label="Esquema (v)" value={String(probe.schemaVersion ?? 0)} />
+            <Row
+              label="Tabla tasks"
+              value={probe.hasTasksTable === true ? 'creada' : 'NO EXISTE'}
+            />
           </>
         )}
       </section>
 
-      <footer className="flex items-center gap-3">
+      <section className="bg-card text-card-foreground w-full max-w-2xl rounded-lg border p-6 shadow-sm">
+        <h2 className="mb-4 text-lg font-medium">Puente IPC</h2>
+        <Row label="window.taskDiary" value={typeof window.taskDiary} />
+        <Row label="window.taskDiary.tasks" value={typeof window.taskDiary?.tasks} />
+        <Row
+          label="Canales"
+          value="task:list · task:create · task:update · task:delete · task:setStatus"
+        />
+      </section>
+
+      <footer className="flex flex-col items-center gap-3">
         <Button variant="outline" size="sm" disabled>
-          Task UI arrives in Fase 1
+          La interfaz de tareas llega en la Fase 2
         </Button>
         <span className="text-muted-foreground text-xs">Electron · React · SQLite · Tailwind</span>
       </footer>

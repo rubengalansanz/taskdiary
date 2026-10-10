@@ -194,7 +194,7 @@ verificar.
 | `npm run lint` | ✅ 0 |
 | `npm run typecheck` | ✅ 0 |
 | `npm run test` | ✅ 5 archivos, **126 tests** |
-| `npm run build` | ✅ main 8.63 kB · preload 195.14 kB · renderer 646.70 kB |
+| `npm run build` | ✅ main 40.14 kB · preload 195.45 kB · renderer 647.80 kB. El salto de main respecto a Fase 0 es el SQL de `0001_init.sql`, embebido por el import `?raw` (ADR-013) |
 | `npm run smoke` | ✅ **37/37 checks** en el build real vía CDP |
 
 Detalle del smoke (`scripts/fase1-smoke.mjs`, 37 checks contra el build de producción):
