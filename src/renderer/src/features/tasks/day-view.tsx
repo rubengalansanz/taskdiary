@@ -185,23 +185,42 @@ export function DayRoute(): React.JSX.Element {
           return
         }
 
-        const updated = await updateTask({ id: editingTask.id, ...values })
-        // The update may have moved the task to another day; both caches are now stale.
+        try {
+          const updated = await updateTask({ id: editingTask.id, ...values })
+          // The update may have moved the task to another day; both caches are now stale.
+          invalidateDate(taskDate)
+          invalidateDate(updated.taskDate)
+          invalidateSearches()
+          invalidateTags()
+          invalidateSummaries()
+          refresh()
+        } catch (cause) {
+          setActionError({
+            code: cause instanceof TaskApiError ? cause.code : 'UNKNOWN',
+            message: cause instanceof Error ? cause.message : 'No se pudo guardar la tarea.'
+          })
+        }
+
+        return
+      }
+
+      try {
+        await createTask({ ...values, taskDate })
         invalidateDate(taskDate)
-        invalidateDate(updated.taskDate)
         invalidateSearches()
         invalidateTags()
         invalidateSummaries()
         refresh()
-        return
+      } catch (cause) {
+        // Saving is the path that writes the most data and the one the user is most likely to
+        // be refused by — the focus rule, validation, a task deleted from under the form. The
+        // other two handlers say so on screen; this one used to fail silently, which reads to
+        // the user as the form simply not working.
+        setActionError({
+          code: cause instanceof TaskApiError ? cause.code : 'UNKNOWN',
+          message: cause instanceof Error ? cause.message : 'No se pudo guardar la tarea.'
+        })
       }
-
-      await createTask({ ...values, taskDate })
-      invalidateDate(taskDate)
-      invalidateSearches()
-      invalidateTags()
-      invalidateSummaries()
-      refresh()
     },
     [editingTaskId, editingTask, taskDate, refresh, closeDialog]
   )

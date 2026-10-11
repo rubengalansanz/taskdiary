@@ -11,6 +11,7 @@ import {
   startOfMonth,
   today
 } from '../../shared/lib/date'
+import { completionRatio, countTasks } from '../../shared/lib/day-summary'
 import type { DaySummaryDto } from '../../../../shared/ipc'
 
 /**
@@ -41,6 +42,8 @@ export function MonthView({ taskDate }: MonthViewProps): React.JSX.Element {
   const month = startOfMonth(taskDate)
   const cells = useMemo(() => monthGrid(taskDate), [taskDate])
   const { byDate } = useDaySummaries(cells[0].date, cells[cells.length - 1].date)
+
+  const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
   const handleNavigate = useCallback(
     (next: string): void => {
       void navigate(pathForView('month', next))
@@ -65,7 +68,7 @@ export function MonthView({ taskDate }: MonthViewProps): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar visibleCount={byDate.size} />
+        <Sidebar visibleCount={visibleCount} />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-auto p-4">
           <p className="text-muted-foreground mb-2 text-sm capitalize" data-testid="month-heading">
@@ -118,7 +121,7 @@ function MonthCell({
   isToday,
   onOpenDay
 }: MonthCellProps): React.JSX.Element {
-  const ratio = summary !== undefined && summary.total > 0 ? summary.done / summary.total : 0
+  const ratio = completionRatio(summary)
 
   return (
     <button

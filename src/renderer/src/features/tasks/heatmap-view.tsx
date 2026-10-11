@@ -5,6 +5,7 @@ import { pathForView, type ViewMode } from '../../routes/view-mode'
 import { TitleBar } from '../../shell/title-bar'
 import { Sidebar } from '../../shell/sidebar'
 import { heatmapRange, today } from '../../shared/lib/date'
+import { countTasks } from '../../shared/lib/day-summary'
 import type { DaySummaryDto } from '../../../../shared/ipc'
 
 /**
@@ -53,6 +54,8 @@ export function HeatmapView({ taskDate }: HeatmapViewProps): React.JSX.Element {
   const days = useMemo(() => heatmapRange(taskDate), [taskDate])
   const { byDate } = useDaySummaries(days[0], days[days.length - 1])
 
+  const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
+
   const handleSelectView = useCallback(
     (view: ViewMode): void => {
       void navigate(pathForView(view, taskDate))
@@ -75,7 +78,7 @@ export function HeatmapView({ taskDate }: HeatmapViewProps): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar visibleCount={byDate.size} />
+        <Sidebar visibleCount={visibleCount} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-auto p-4">
           <p className="text-muted-foreground text-sm">

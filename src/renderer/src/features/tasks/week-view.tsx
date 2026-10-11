@@ -5,6 +5,7 @@ import { pathForView, type ViewMode } from '../../routes/view-mode'
 import { TitleBar } from '../../shell/title-bar'
 import { Sidebar } from '../../shell/sidebar'
 import { formatMinutesSigned, normalizeDateParam, today, weekDates } from '../../shared/lib/date'
+import { countTasks, estimateDrift } from '../../shared/lib/day-summary'
 import type { DaySummaryDto } from '../../../../shared/ipc'
 
 /**
@@ -36,6 +37,8 @@ export function WeekView({ taskDate }: WeekViewProps): React.JSX.Element {
   const days = useMemo(() => weekDates(taskDate), [taskDate])
   const { byDate } = useDaySummaries(days[0], days[days.length - 1])
 
+  const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
+
   const handleNavigate = useCallback(
     (next: string): void => {
       void navigate(pathForView('week', next))
@@ -60,7 +63,7 @@ export function WeekView({ taskDate }: WeekViewProps): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar visibleCount={byDate.size} />
+        <Sidebar visibleCount={visibleCount} />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-auto p-4">
           <div className="grid grid-cols-7 gap-2">
@@ -158,7 +161,7 @@ function Balance({ summary }: BalanceProps): React.JSX.Element {
     )
   }
 
-  const drift = summary.realMin - summary.estimateMin
+  const drift = estimateDrift(summary)
 
   return (
     <p className="text-xs tabular-nums" data-testid="week-balance">
