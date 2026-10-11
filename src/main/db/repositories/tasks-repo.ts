@@ -7,6 +7,7 @@ import { toAuditTimestamp } from '../../core/datetime'
 import {
   diffTaskForUpdate,
   WRITABLE_TASK_FIELDS,
+  type DaySummary,
   type RruleFreq,
   type Task,
   type TaskStatus,
@@ -117,6 +118,38 @@ const TASK_COLUMNS = `
   created_at, updated_at, started_at, completed_at
 `.trim()
 
+/** Shape of an already-grouped `GROUP BY task_date` row. `SUM` yields numbers, never null. */
+interface DaySummaryRow {
+  date: string
+  pending: number
+  in_progress: number
+  done: number
+  cancelled: number
+  estimate_min: number
+  real_seconds: number
+  unmeasured_done: number
+}
+
+/**
+ * Converts one grouped row into the domain summary.
+ *
+ * `total` deliberately excludes `cancelled`: the Month view's ring and the Heatmap's amber both
+ * ask how much work a day held, and work nobody chose to do was never on the board.
+ */
+function toDaySummary(row: DaySummaryRow): DaySummary {
+  return {
+    date: row.date,
+    total: row.pending + row.in_progress + row.done,
+    done: row.done,
+    inProgress: row.in_progress,
+    pending: row.pending,
+    cancelled: row.cancelled,
+    estimateMin: row.estimate_min,
+    realMin: Math.round(row.real_seconds / 60),
+    unmeasuredDone: row.unmeasured_done
+  }
+}
+
 /**
  * Maps a domain field name to its column name.
  *
@@ -222,6 +255,57 @@ export class TasksRepository {
       .all(fromDate, toDate) as TaskRow[]
 
     return this.attachTags(rows.map(toTask))
+  }
+
+  /**
+   * Returns one `DaySummary` per calendar day in the range that holds work.
+   *
+   * One statement, one pass, `GROUP BY task_date`. The three Fase 4 views need counts and sums,
+   * not tasks, so nothing here materialises a `TaskRow` and nothing leaves the database until a
+   * day has already been collapsed to a single line.
+   *
+   * Real minutes are summed in *seconds* and converted once, here. Rounding each task to whole
+   * minutes before summing would silently discard up to 59 seconds per task, which on a day of
+   * short tasks is most of the day.
+   *
+   * @param fromDate First day of the range, `YYYY-MM-DD`, inclusive.
+   * @param toDate Last day of the range, `YYYY-MM-DD`, inclusive.
+   * @returns One summary per day that has work, ordered by date. Days with nothing are omitted,
+   *   and an empty range yields an empty array.
+   * @throws AppError `VALIDATION_FAILED` when the range is inverted.
+   */
+  summarizeRange(fromDate: string, toDate: string): DaySummary[] {
+    if (fromDate > toDate) {
+      throw new AppError(
+        'VALIDATION_FAILED',
+        'El rango de fechas está invertido: la fecha inicial es posterior a la final.',
+        { field: 'fromDate' }
+      )
+    }
+
+    const rows = this.database
+      .prepare(
+        `SELECT
+           task_date AS date,
+           SUM(CASE WHEN status = 'pending'     THEN 1 ELSE 0 END) AS pending,
+           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+           SUM(CASE WHEN status = 'done'        THEN 1 ELSE 0 END) AS done,
+           SUM(CASE WHEN status = 'cancelled'   THEN 1 ELSE 0 END) AS cancelled,
+           SUM(CASE WHEN status <> 'cancelled'
+                    THEN COALESCE(estimate_min, 0) ELSE 0 END) AS estimate_min,
+           SUM(CASE WHEN status = 'done' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+                    THEN strftime('%s', completed_at) - strftime('%s', started_at)
+                    ELSE 0 END) AS real_seconds,
+           SUM(CASE WHEN status = 'done' AND (started_at IS NULL OR completed_at IS NULL)
+                    THEN 1 ELSE 0 END) AS unmeasured_done
+         FROM tasks
+        WHERE task_date BETWEEN ? AND ?
+        GROUP BY task_date
+        ORDER BY task_date ASC`
+      )
+      .all(fromDate, toDate) as DaySummaryRow[]
+
+    return rows.map(toDaySummary)
   }
 
   /**

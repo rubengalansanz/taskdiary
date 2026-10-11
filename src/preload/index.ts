@@ -56,6 +56,7 @@ const theme: TaskDiaryApi['theme'] = {
 const tasks: TaskDiaryApi['tasks'] = {
   list: (request) => invoke(IPC_CHANNELS.taskList, request),
   listRange: (request) => invoke(IPC_CHANNELS.taskListRange, request),
+  summaryRange: (request) => invoke(IPC_CHANNELS.taskSummaryRange, request),
   create: (request) => invoke(IPC_CHANNELS.taskCreate, request),
   update: (request) => invoke(IPC_CHANNELS.taskUpdate, request),
   delete: (request) => invoke(IPC_CHANNELS.taskDelete, request),

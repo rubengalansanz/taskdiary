@@ -1,5 +1,6 @@
-import { useUiStore, type ViewMode } from '../stores/ui-store'
-import { addDays, today } from '../shared/lib/date'
+import { useUiStore } from '../stores/ui-store'
+import { VIEW_LABELS, VIEW_MODES, type ViewMode } from '../routes/view-mode'
+import { addDays, addMonths, today } from '../shared/lib/date'
 import { Button } from '../components/ui/button'
 
 /**
@@ -8,69 +9,116 @@ import { Button } from '../components/ui/button'
  * The selected day is read from and written to the URL, never from a store: a day has to
  * be linkable and the system back button has to walk the history, which is the entire
  * point of a diary you read backwards.
+ *
+ * How far the arrows move, and which quick jumps make sense, depend on what is on screen.
+ * Stepping one day while looking at a month is technically correct and practically useless —
+ * twenty-six clicks to leave October — so each view declares its own stride. "Ayer" is
+ * honest in the day view and meaningless in the week one, where the buttons collapse to the
+ * single "Hoy" that does apply. The heatmap is anchored to today and has neither.
  */
 
-const VIEW_LABELS: Readonly<Record<ViewMode, string>> = { day: 'Día' }
+/**
+ * How far the arrows move in each view, forwards or backwards.
+ *
+ * `null` means the view has no date to move: the heatmap always shows the last 26 weeks.
+ */
+const NAV_STEP: Readonly<Record<ViewMode, ((date: string, delta: number) => string) | null>> = {
+  day: (date, delta) => addDays(date, delta),
+  week: (date, delta) => addDays(date, delta * 7),
+  month: (date, delta) => addMonths(date, delta),
+  heatmap: null
+}
 
 /** Props of {@link TitleBar}. */
 export interface TitleBarProps {
-  /** Day currently shown, as `YYYY-MM-DD`. */
+  /** View on screen. */
+  view: ViewMode
+  /** Day the view is centred on, as `YYYY-MM-DD`. Ignored by the heatmap. */
   taskDate: string
-  /** Moves the URL to another day. */
+  /** Moves the URL to another day, stepping by whatever the view considers one period. */
   onNavigate: (taskDate: string) => void
+  /** Switches view, keeping the day. */
+  onSelectView: (view: ViewMode) => void
 }
 
 /**
  * Renders the top bar.
  *
- * @param props Day and navigation callback.
+ * @param props View, day and the two navigation callbacks.
  * @returns The title bar element.
  */
-export function TitleBar({ taskDate, onNavigate }: TitleBarProps): React.JSX.Element {
-  const view = useUiStore((state) => state.view)
-  const setView = useUiStore((state) => state.setView)
+export function TitleBar({
+  view,
+  taskDate,
+  onNavigate,
+  onSelectView
+}: TitleBarProps): React.JSX.Element {
   const openDialog = useUiStore((state) => state.openDialog)
+  const step = NAV_STEP[view]
+  const canStep = step !== null
+
+  /**
+   * Moves by whole periods. A no-op on views that cannot move, so the button can stay disabled
+   * rather than every caller re-checking `canStep`.
+   */
+  const shift = (delta: number, from: string): void => {
+    if (step !== null) {
+      onNavigate(step(from, delta))
+    }
+  }
 
   return (
     <header className="border-border flex items-center gap-2 border-b px-4 py-3">
       <Button
         variant="outline"
         size="icon"
-        aria-label="Día anterior"
-        onClick={() => onNavigate(addDays(taskDate, -1))}
+        aria-label="Periodo anterior"
+        disabled={!canStep}
+        onClick={() => shift(-1, taskDate)}
       >
         ‹
       </Button>
 
-      <Button variant="ghost" size="sm" onClick={() => onNavigate(addDays(today(), -1))}>
-        Ayer
-      </Button>
+      {view === 'day' && (
+        <>
+          <Button variant="ghost" size="sm" onClick={() => shift(-1, today())}>
+            Ayer
+          </Button>
 
-      <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
-        Hoy
-      </Button>
+          <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
+            Hoy
+          </Button>
 
-      <Button variant="ghost" size="sm" onClick={() => onNavigate(addDays(today(), 1))}>
-        Mañana
-      </Button>
+          <Button variant="ghost" size="sm" onClick={() => shift(1, today())}>
+            Mañana
+          </Button>
+        </>
+      )}
+
+      {view !== 'day' && (
+        <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
+          {view === 'week' ? 'Semana actual' : view === 'month' ? 'Mes actual' : 'Ir al día'}
+        </Button>
+      )}
 
       <Button
         variant="outline"
         size="icon"
-        aria-label="Día siguiente"
-        onClick={() => onNavigate(addDays(taskDate, 1))}
+        aria-label="Periodo siguiente"
+        disabled={!canStep}
+        onClick={() => shift(1, taskDate)}
       >
         ›
       </Button>
 
       <div className="bg-muted flex items-center gap-1 rounded-md p-0.5">
-        {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => (
+        {VIEW_MODES.map((mode) => (
           <Button
             key={mode}
             variant={view === mode ? 'secondary' : 'ghost'}
             size="sm"
             aria-pressed={view === mode}
-            onClick={() => setView(mode)}
+            onClick={() => onSelectView(mode)}
           >
             {VIEW_LABELS[mode]}
           </Button>

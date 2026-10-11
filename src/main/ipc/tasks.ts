@@ -18,6 +18,7 @@ import {
   createTaskRequestSchema,
   deleteTaskRequestSchema,
   listTaskRangeRequestSchema,
+  summarizeRangeRequestSchema,
   listTasksRequestSchema,
   setTaskStatusRequestSchema,
   updateTaskRequestSchema,
@@ -30,6 +31,7 @@ import {
   type TaskListResultDto,
   type SearchTasksResultDto,
   type TagListResultDto,
+  type SummarizeRangeResultDto,
   type TaskResultDto,
   type UpdateTaskRequest
 } from '../../shared/ipc'
@@ -63,6 +65,8 @@ type FailureDto = Extract<TaskResultDto, { ok: false }>
 type SearchTasksOk = Extract<SearchTasksResultDto, { ok: true }>
 /** Success half of a tag listing. */
 type TagListOk = Extract<TagListResultDto, { ok: true }>
+/** Success half of a per-day aggregation. */
+type SummarizeRangeOk = Extract<SummarizeRangeResultDto, { ok: true }>
 
 /**
  * Turns a Zod failure into the `AppErrorDetails.fieldMessages` map.
@@ -301,6 +305,24 @@ export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsR
           tasks: repository
             .listByRange(assertLocalDate(request.fromDate), assertLocalDate(request.toDate))
             .map(toTaskDto)
+        }
+      })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.taskSummaryRange,
+    (_event: IpcMainInvokeEvent, payload: unknown): SummarizeRangeResultDto | FailureDto =>
+      guard((): SummarizeRangeOk | FailureDto => {
+        const request = parseOrThrow(summarizeRangeRequestSchema, payload)
+
+        // No mapping and no per-task work: the repository already collapsed each day to one
+        // grouped row. Whatever comes back is already the shape `daySummarySchema` describes.
+        return {
+          ok: true,
+          days: repository.summarizeRange(
+            assertLocalDate(request.fromDate),
+            assertLocalDate(request.toDate)
+          )
         }
       })
   )

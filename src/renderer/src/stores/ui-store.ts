@@ -6,24 +6,24 @@ import type { TaskStatusDto } from '../../../shared/ipc'
  *
  * The selected date is deliberately **absent**: it lives in the URL
  * (`/day/2026-10-10`) so the day is linkable and the system back button works, which is
- * the whole point of a diary you navigate backwards through. What stays here is state the
- * user chose that nobody would put in a URL — which view is active, whether the form is
- * open.
+ * the whole point of a diary you navigate backwards through.
+ *
+ * The active view is absent for the same reason. Until Fase 4 it lived here, and that was a
+ * second source of truth for one fact: the URL said `day` while the store said `week`, and the
+ * store was the one the title bar believed. The route now decides both — `/week/2026-10-10`
+ * *is* the week view of that week — so neither can disagree with the other. What stays here is
+ * state nobody would put in a URL: which modal is open, what the user typed, which filters
+ * are on.
  *
  * Task data is not here either. It is server state with its own cache in
  * `hooks/use-tasks.ts`; putting it in Zustand would mean invalidating it in two places.
  */
-
-/** Views the title bar can switch to. Fases 4 and 5 add the rest. */
-export type ViewMode = 'day'
 
 /** Modal dialog currently open. `null` means none. */
 export type OpenDialog = 'create' | 'edit' | null
 
 /** State and actions of the UI store. */
 interface UiState {
-  /** Active view. */
-  view: ViewMode
   /** Which modal is open. */
   dialog: OpenDialog
   /** Id of the task being edited, when `dialog` is `edit`. */
@@ -36,8 +36,6 @@ interface UiState {
   statusFilter: TaskStatusDto[]
   /** Tag ids the sidebar is filtering by. Empty means every task. */
   tagFilter: string[]
-  /** Switches the active view. */
-  setView: (view: ViewMode) => void
   /** Opens a modal, remembering which task is being edited. */
   openDialog: (dialog: Exclude<OpenDialog, null>, taskId?: string) => void
   /** Closes whichever modal is open. */
@@ -71,15 +69,12 @@ function toggle<T>(current: T[], value: T): T[] {
 
 /** The UI store. */
 export const useUiStore = create<UiState>((set) => ({
-  view: 'day',
   dialog: null,
   editingTaskId: null,
   selectedTaskId: null,
   searchQuery: '',
   statusFilter: [],
   tagFilter: [],
-
-  setView: (view) => set({ view }),
 
   openDialog: (dialog, taskId) =>
     set({ dialog, editingTaskId: dialog === 'edit' ? (taskId ?? null) : null }),

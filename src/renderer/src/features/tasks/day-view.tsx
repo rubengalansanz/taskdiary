@@ -7,7 +7,9 @@ import { TaskForm, type TaskFormValues } from '../tasks/task-form'
 import { useUiStore } from '../../stores/ui-store'
 import { invalidateDate, useTasks } from '../../hooks/use-tasks'
 import { invalidateSearches, invalidateTags, useSearch } from '../../hooks/use-search'
+import { invalidateSummaries } from '../../hooks/use-day-summaries'
 import { useCompleteSelected } from '../../hooks/use-shortcuts'
+import { pathForView, type ViewMode } from '../../routes/view-mode'
 import { normalizeDateParam } from '../../shared/lib/date'
 import {
   createTask,
@@ -99,6 +101,14 @@ export function DayRoute(): React.JSX.Element {
     [navigate]
   )
 
+  const handleSelectView = useCallback(
+    (view: ViewMode): void => {
+      setActionError(null)
+      void navigate(pathForView(view, taskDate))
+    },
+    [navigate, taskDate]
+  )
+
   const handleStatusChange = useCallback(
     async (task: TaskDto, next: TaskStatusDto): Promise<void> => {
       setActionError(null)
@@ -107,6 +117,7 @@ export function DayRoute(): React.JSX.Element {
         await setTaskStatus(task.id, next)
         invalidateDate(taskDate)
         invalidateSearches()
+        invalidateSummaries()
         refresh()
       } catch (cause) {
         // The focus rule lives in the main process, so this is where "you already have a
@@ -144,6 +155,7 @@ export function DayRoute(): React.JSX.Element {
         invalidateDate(taskDate)
         invalidateSearches()
         invalidateTags()
+        invalidateSummaries()
         refresh()
       } catch (cause) {
         setActionError({
@@ -179,6 +191,7 @@ export function DayRoute(): React.JSX.Element {
         invalidateDate(updated.taskDate)
         invalidateSearches()
         invalidateTags()
+        invalidateSummaries()
         refresh()
         return
       }
@@ -187,6 +200,7 @@ export function DayRoute(): React.JSX.Element {
       invalidateDate(taskDate)
       invalidateSearches()
       invalidateTags()
+      invalidateSummaries()
       refresh()
     },
     [editingTaskId, editingTask, taskDate, refresh, closeDialog]
@@ -200,7 +214,12 @@ export function DayRoute(): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col">
-      <TitleBar taskDate={taskDate} onNavigate={handleNavigate} />
+      <TitleBar
+        view="day"
+        taskDate={taskDate}
+        onNavigate={handleNavigate}
+        onSelectView={handleSelectView}
+      />
 
       <div className="flex min-h-0 flex-1">
         <Sidebar visibleCount={visibleCount} />

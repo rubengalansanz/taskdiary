@@ -116,6 +116,12 @@ export const listTaskRangeRequestSchema = z.object({
   toDate: localDateSchema
 })
 
+/** Request for `task:summaryRange` — per-day aggregates between two days, inclusive. */
+export const summarizeRangeRequestSchema = z.object({
+  fromDate: localDateSchema,
+  toDate: localDateSchema
+})
+
 /** Request for `task:create`. Every field except `title` and `taskDate` is optional. */
 export const createTaskRequestSchema = z.object({
   title: titleSchema,
@@ -266,9 +272,50 @@ export const taskListResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), error: appErrorSchema })
 ])
 
+/** One aggregated day, as it travels over the bridge. */
+export type DaySummaryDto = z.infer<typeof daySummarySchema>
+/** Result of `task:summaryRange`. */
+export type SummarizeRangeResultDto = z.infer<typeof summarizeRangeResultSchema>
+
 /** A deletion result. `removed` is false when the id did not exist. */
 export const deleteTaskResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), removed: z.boolean() }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/**
+ * One day of the diary, already aggregated by `GROUP BY task_date`.
+ *
+ * The Week, Month and Heatmap views all read this and none of them reads tasks. That is the
+ * whole point of Fase 4's acceptance criterion: the counts happen in SQLite, so a 26-week
+ * heatmap costs 182 grouped rows instead of every task ever recorded.
+ */
+export const daySummarySchema = z.object({
+  /** Local calendar day as `YYYY-MM-DD`. */
+  date: localDateSchema,
+  /** Tasks representing work: pending + in_progress + done. Excludes cancelled. */
+  total: z.number().int().min(0),
+  done: z.number().int().min(0),
+  inProgress: z.number().int().min(0),
+  pending: z.number().int().min(0),
+  cancelled: z.number().int().min(0),
+  /** Sum of the day's estimates; a task with no estimate contributes zero. */
+  estimateMin: z.number().int().min(0),
+  /** Minutes actually spent, measured from `startedAt` to `completedAt`. */
+  realMin: z.number().int().min(0),
+  /**
+   * Completed tasks with no measurable duration, excluded from `realMin`.
+   *
+   * Not a rounding artefact: migration 0002 could not back-fill `started_at`, so a task
+   * completed without having run has no real time to report. The Week view shows it as
+   * unknown instead of pretending the estimate was missed.
+   */
+  unmeasuredDone: z.number().int().min(0)
+})
+
+/** Result of `task:summaryRange` — only the days that hold work. */
+export const summarizeRangeResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), days: z.array(daySummarySchema) }),
   z.object({ ok: z.literal(false), error: appErrorSchema })
 ])
 
@@ -337,6 +384,8 @@ export type AppErrorDto = z.infer<typeof appErrorSchema>
 export type ListTasksRequest = z.infer<typeof listTasksRequestSchema>
 /** Request for `task:listRange`. */
 export type ListTaskRangeRequest = z.infer<typeof listTaskRangeRequestSchema>
+/** Request for `task:summaryRange`. */
+export type SummarizeRangeRequest = z.infer<typeof summarizeRangeRequestSchema>
 /** Request for `task:create`. */
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>
 /** Request for `task:update`. */
@@ -367,6 +416,8 @@ export const IPC_CHANNELS = {
   taskList: 'taskdiary:task:list',
   /** Phase 1: every task between two calendar days, inclusive. */
   taskListRange: 'taskdiary:task:list-range',
+  /** Phase 4: one aggregate per day between two calendar days, inclusive. */
+  taskSummaryRange: 'taskdiary:task:summary-range',
   /** Phase 1: insert a task. */
   taskCreate: 'taskdiary:task:create',
   /** Phase 1: partially update a task. */
@@ -410,6 +461,13 @@ export interface TaskApi {
   list(request: ListTasksRequest): Promise<TaskListResultDto>
   /** Every task in an inclusive day range. */
   listRange(request: ListTaskRangeRequest): Promise<TaskListResultDto>
+  /**
+   * One aggregate per day in an inclusive range, aggregated in SQL.
+   *
+   * Fase 4's acceptance criterion, exposed as a channel: the Week, Month and Heatmap views
+   * count days without ever receiving a task row.
+   */
+  summaryRange(request: SummarizeRangeRequest): Promise<SummarizeRangeResultDto>
   /** Inserts a task and returns it as stored. */
   create(request: CreateTaskRequest): Promise<TaskResultDto>
   /** Applies a partial update and returns the task as stored. */

@@ -1,4 +1,10 @@
-import type { AppErrorDto, SearchTasksRequest, TagDto, TaskDto } from '../../../../shared/ipc'
+import type {
+  AppErrorDto,
+  DaySummaryDto,
+  SearchTasksRequest,
+  TagDto,
+  TaskDto
+} from '../../../../shared/ipc'
 
 /**
  * The renderer's view of the task API.
@@ -48,6 +54,35 @@ function unwrap<TResult extends { ok: true; tasks?: unknown } | { ok: true; task
   return result
 }
 
+/** Tasks of one calendar day. */
+export async function listTasks(taskDate: string): Promise<TaskDto[]> {
+  const result = await window.taskDiary.tasks.list({ taskDate })
+
+  return unwrap(result).tasks ?? []
+}
+
+/**
+ * One aggregate per day in an inclusive range.
+ *
+ * Fase 4's acceptance criterion, seen from the renderer: the Week, Month and Heatmap views
+ * receive counts and sums and never a task. Days with no work are absent from `days`, so
+ * callers index by date rather than by position.
+ *
+ * @param fromDate First day of the range, `YYYY-MM-DD`.
+ * @param toDate Last day of the range, `YYYY-MM-DD`, inclusive.
+ * @returns Summaries of the days that hold work, ordered by date.
+ * @throws TaskApiError when the range is inverted or malformed.
+ */
+export async function summarizeRange(fromDate: string, toDate: string): Promise<DaySummaryDto[]> {
+  const result = await window.taskDiary.tasks.summaryRange({ fromDate, toDate })
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result.days
+}
+
 /** Every tag in use, with how many tasks carry it. */
 export async function listTags(): Promise<TagDto[]> {
   const result = await window.taskDiary.tags.list()
@@ -57,13 +92,6 @@ export async function listTags(): Promise<TagDto[]> {
   }
 
   return result.tags
-}
-
-/** Tasks of one calendar day. */
-export async function listTasks(taskDate: string): Promise<TaskDto[]> {
-  const result = await window.taskDiary.tasks.list({ taskDate })
-
-  return unwrap(result).tasks ?? []
 }
 
 /** Inserts a task and returns it as stored. */

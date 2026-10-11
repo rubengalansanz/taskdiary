@@ -68,6 +68,47 @@ export interface Task {
 }
 
 /**
+ * What one calendar day adds up to.
+ *
+ * Fase 4's Week, Month and Heatmap views all ask the same question — "how was this day?" — and
+ * none of them needs the tasks themselves. Aggregating in SQL (`GROUP BY task_date`) is the
+ * acceptance criterion for the phase: a 26-week heatmap spans 182 days, and reading those days
+ * as rows to count them in the renderer is exactly what the plan forbids.
+ */
+export interface DaySummary {
+  /** Local calendar day as `YYYY-MM-DD`. */
+  date: string
+  /** Tasks that represent work: pending + in_progress + done. Excludes cancelled. */
+  total: number
+  /** Tasks in `done`. */
+  done: number
+  /** Tasks in `in_progress`. */
+  inProgress: number
+  /** Tasks in `pending`. */
+  pending: number
+  /** Tasks in `cancelled`, reported but never counted as work. */
+  cancelled: number
+  /** Sum of `estimate_min` over the day's work; a task with no estimate contributes zero. */
+  estimateMin: number
+  /**
+   * Minutes actually spent, measured from `startedAt` to `completedAt` on completed tasks.
+   *
+   * There is no `completed_min` column and Fase 4 does not add one: UC-2 has the app time the
+   * real duration, and the stopwatch from Fase 2 already records both ends.
+   */
+  realMin: number
+  /**
+   * Completed tasks whose real duration is unknowable, excluded from `realMin`.
+   *
+   * Migration 0002 could not back-fill `started_at`, so a task completed without ever having
+   * run has no measurable duration. Counting it as zero would make the Week view report the
+   * estimate as missed by 100% when the truth is "never measured" — the same reason 0002 made
+   * the stopwatch show unknown instead of guessing.
+   */
+  unmeasuredDone: number
+}
+
+/**
  * Which status transitions the domain allows.
  *
  * `done` is terminal: no transition leaves it. This is the invariant that makes a diary

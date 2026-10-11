@@ -176,10 +176,11 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ### Fase 4 · Vistas Semana, Mes y Heatmap — 1,5 días
 
-- [ ] `WeekView` con columnas y balance estimado/real
-- [ ] `MonthView` con mini-ring de progreso por día
-- [ ] `Heatmap` de 26 semanas + tooltip + navegación por clic
-- [ ] Canal `task:listRange` para consultas por rango
+- [x] `WeekView` con columnas y balance estimado/real
+- [x] `MonthView` con mini-ring de progreso por día
+- [x] `Heatmap` de 26 semanas + tooltip + navegación por clic
+- [x] Canal `task:listRange` para consultas por rango — ya existía desde la Fase 1; no se reimplementa
+- [x] Canal `task:summaryRange`: una fila agregada por día vía `GROUP BY task_date`
 
 **Entregable:** visibilidad completa del pasado y del mes.
 
@@ -385,6 +386,9 @@ Definidas **30 días después de instalar la v1.0**.
 | ADR-020 | La búsqueda abarca todo el histórico, acotada a 500 filas | Aceptada (Fase 3) |
 | ADR-021 | Las reglas de etiqueta viven en `src/shared/tags.ts`, no en `main/core` | Aceptada (Fase 3) |
 | ADR-022 | Varias etiquetas significan OR, no AND | Aceptada (Fase 3) |
+| ADR-023 | El tiempo real de una tarea completada es `completed_at - started_at`; sin columna nueva, y lo no medido se reporta como tal | Aceptada (Fase 4) |
+| ADR-024 | La vista activa vive en la ruta (`/week/:date`), no en Zustand: la URL responde a fecha y vista a la vez | Aceptada (Fase 4) |
+| ADR-025 | Semana, Mes y Heatmap leen agregados por día, nunca tareas | Aceptada (Fase 4) |
 
 ---
 
