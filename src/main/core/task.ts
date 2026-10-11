@@ -40,6 +40,8 @@ export interface Task {
   estimateMin: number | null
   /** Optional user colour, `null` when unset. */
   color: string | null
+  /** Normalised tag names attached to this task, without the leading `#`. */
+  tags: string[]
   /** Recurrence frequency; `none` for a one-off task. */
   rruleFreq: RruleFreq
   /** How many frequency periods elapse between occurrences. Always ≥ 1. */

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_TAG_LENGTH, MIN_TAG_LENGTH } from './tags'
 
 /**
  * The closed IPC contract between the main process, the preload bridge and the renderer.
@@ -38,11 +39,15 @@ export const MAX_TITLE_LENGTH = 200
 /** Maximum length of task notes, in characters. */
 export const MAX_NOTES_LENGTH = 20_000
 
-/** Maximum number of tags attached to a task. Fase 3. */
+/**
+ * Maximum number of tags attached to one task.
+ *
+ * The bound on a tag's *length* is not declared here: it lives in `./tags.ts` as
+ * {@link MAX_TAG_LENGTH}, next to the function that enforces it, and `tagNameSchema`
+ * below imports it. A second copy of the number in this module would be exactly the drift
+ * the note above these constants warns about.
+ */
 export const MAX_TAGS_PER_TASK = 20
-
-/** Maximum length of a tag name, without the leading `#`. Fase 3. */
-export const MAX_TAG_NAME_LENGTH = 40
 
 // ---------------------------------------------------------------------------
 // Reusable field schemas
@@ -75,6 +80,21 @@ const weekdaySchema = z.number().int().min(1).max(7)
 /** An opaque task identifier. Not forced to be a UUID: Fase 5 materialises ids of its own. */
 const taskIdSchema = z.string().min(1).max(64)
 
+/**
+ * A tag name as stored: no `#`, folded, bounded by the very constants
+ * {@link normalizeTagName} enforces.
+ */
+export const tagNameSchema = z
+  .string()
+  .trim()
+  .min(MIN_TAG_LENGTH, { message: `Una etiqueta necesita al menos ${MIN_TAG_LENGTH} caracteres.` })
+  .max(MAX_TAG_LENGTH, {
+    message: `Una etiqueta no puede superar los ${MAX_TAG_LENGTH} caracteres.`
+  })
+
+/** The `tags` field of a create or update payload. */
+const tagsSchema = z.array(tagNameSchema).max(MAX_TAGS_PER_TASK)
+
 /** Recurrence frequency of a task series. */
 export const rruleFreqSchema = z.enum(['none', 'daily', 'weekly', 'monthly', 'weekdays'])
 
@@ -101,6 +121,7 @@ export const createTaskRequestSchema = z.object({
   title: titleSchema,
   notes: notesSchema.nullish(),
   taskDate: localDateSchema,
+  tags: tagsSchema.optional(),
   startMin: minuteOfDaySchema.optional(),
   endMin: minuteOfDaySchema.optional(),
   estimateMin: estimateSchema.optional(),
@@ -116,6 +137,7 @@ export const createTaskRequestSchema = z.object({
 export const updateTaskRequestSchema = z.object({
   id: taskIdSchema,
   status: taskStatusSchema.optional(),
+  tags: tagsSchema.optional(),
   title: titleSchema.optional(),
   notes: notesSchema.nullish(),
   taskDate: localDateSchema.optional(),
@@ -130,6 +152,15 @@ export const updateTaskRequestSchema = z.object({
   rruleFrom: localDateSchema.nullish()
 })
 
+/** Request for `task:search`. */
+export type SearchTasksRequest = z.infer<typeof searchTasksRequestSchema>
+/** A tag with its usage count. */
+export type TagDto = z.infer<typeof tagSchema>
+/** Result of `task:search`. */
+export type SearchTasksResultDto = z.infer<typeof searchTasksResultSchema>
+/** Result of `tag:list`. */
+export type TagListResultDto = z.infer<typeof tagListResultSchema>
+
 /** Request for `task:delete`. */
 export const deleteTaskRequestSchema = z.object({
   id: taskIdSchema
@@ -139,6 +170,30 @@ export const deleteTaskRequestSchema = z.object({
 export const setTaskStatusRequestSchema = z.object({
   id: taskIdSchema,
   status: taskStatusSchema
+})
+
+/**
+ * Upper bound on rows a search may return.
+ *
+ * The master plan's §14 asks for a bounded search rather than loading the whole history
+ * into the renderer. 500 rows is far more than anyone scrolls, and it keeps the payload
+ * and the re-ranking pass bounded even with years of history.
+ */
+export const MAX_SEARCH_RESULTS = 500
+
+/** Request for `task:search`. Every field is optional: an empty query lists everything. */
+export const searchTasksRequestSchema = z.object({
+  /**
+   * Text to look for in the title and the notes. Matched against the folded copy in
+   * `search_text`, so case and accents do not matter.
+   */
+  query: z.string().max(200).optional(),
+  /** Restrict to these statuses. Empty or absent means every status. */
+  statuses: z.array(taskStatusSchema).max(4).optional(),
+  /** Restrict to tasks carrying **any** of these tags. Empty or absent means every task. */
+  tagIds: z.array(taskIdSchema).max(50).optional(),
+  /** How many rows to return. Capped at {@link MAX_SEARCH_RESULTS}. */
+  limit: z.number().int().min(1).max(MAX_SEARCH_RESULTS).optional()
 })
 
 // ---------------------------------------------------------------------------
@@ -164,7 +219,8 @@ export const taskSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   startedAt: z.string().nullable(),
-  completedAt: z.string().nullable()
+  completedAt: z.string().nullable(),
+  tags: z.array(z.string())
 })
 
 /** Error codes that can cross the bridge. Mirrors `AppErrorCode` in `core/errors.ts`. */
@@ -213,6 +269,39 @@ export const taskListResultSchema = z.discriminatedUnion('ok', [
 /** A deletion result. `removed` is false when the id did not exist. */
 export const deleteTaskResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), removed: z.boolean() }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** A tag as it travels over the bridge, with how many tasks carry it. */
+export const tagSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string().nullable(),
+  /** How many tasks carry this tag across the whole history. */
+  taskCount: z.number().int().min(0)
+})
+
+/**
+ * Result of `task:search`.
+ *
+ * `total` is counted separately from the returned rows, so the sidebar can say
+ * "412 resultados" while showing the first 500. Reporting only what came back would make
+ * the counter silently wrong the moment the history grew past the limit.
+ */
+export const searchTasksResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    tasks: z.array(taskSchema),
+    total: z.number().int().min(0),
+    /** True when `total` exceeds the returned rows. */
+    truncated: z.boolean()
+  }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** Result of `tag:list`. */
+export const tagListResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), tags: z.array(tagSchema) }),
   z.object({ ok: z.literal(false), error: appErrorSchema })
 ])
 
@@ -286,6 +375,10 @@ export const IPC_CHANNELS = {
   taskDelete: 'taskdiary:task:delete',
   /** Phase 2: move a task through the state machine. */
   taskSetStatus: 'taskdiary:task:set-status',
+  /** Phase 3: search the whole history by text, tags and status. */
+  taskSearch: 'taskdiary:task:search',
+  /** Phase 3: every tag in use, with how many tasks carry it. */
+  tagList: 'taskdiary:tag:list',
   /**
    * Phase 2: channels the native menu uses to reach the renderer.
    *
@@ -325,6 +418,14 @@ export interface TaskApi {
   delete(request: DeleteTaskRequest): Promise<DeleteTaskResultDto>
   /** Moves a task through the state machine. Registered in Fase 2. */
   setStatus(request: { id: string; status: TaskStatusDto }): Promise<TaskResultDto>
+  /** Searches the whole history by text, tags and status. */
+  search(request: SearchTasksRequest): Promise<SearchTasksResultDto>
+}
+
+/** Tag channels, grouped apart because they carry no payload. */
+export interface TagApi {
+  /** Every tag in use, with how many tasks carry it. */
+  list(): Promise<TagListResultDto>
 }
 
 /** Light/dark theme bridge backed by Electron's `nativeTheme`. */
@@ -390,8 +491,10 @@ export interface TaskDiaryApi {
   db: {
     probe(): Promise<z.infer<typeof dbProbeResultSchema>>
   }
-  /** Phase 1 task CRUD. */
+  /** Phase 1 task CRUD, plus the Phase 3 search. */
   tasks: TaskApi
+  /** Phase 3 tags. */
+  tags: TagApi
   /** Phase 2 native menu accelerators. */
   menu: TaskDiaryMenuApi
   /** Light/dark theme bridge. */

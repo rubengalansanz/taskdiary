@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { openInMemoryDatabase } from '../db/database'
 import { runMigrations } from '../db/migrate'
 import { TasksRepository, type NewTaskInput } from '../db/repositories/tasks-repo'
+import { TagsRepository } from '../db/repositories/tags-repo'
 import {
   assertEstimateMinutes,
   assertLocalDate,
@@ -38,7 +39,7 @@ let repository: TasksRepository
 beforeEach(() => {
   database = openInMemoryDatabase()
   runMigrations(database)
-  repository = new TasksRepository(database)
+  repository = new TasksRepository(database, new TagsRepository(database))
 })
 
 /** Row count read directly from SQLite, never from the repository's cache. */
@@ -88,6 +89,7 @@ function handleCreate(payload: unknown): { ok: true; title: string } | AppErrorD
       endMin,
       estimateMin: assertEstimateMinutes(parsed.data.estimateMin ?? null),
       color: parsed.data.color ?? null,
+      tags: parsed.data.tags ?? [],
       ...normalizeRecurrence({
         rruleFreq: parsed.data.rruleFreq ?? 'none',
         rruleInterval: parsed.data.rruleInterval ?? 1,
@@ -230,6 +232,7 @@ describe('list and update payloads are validated before any read or write', () =
       endMin: null,
       estimateMin: null,
       color: null,
+      tags: [],
       rruleFreq: 'none',
       rruleInterval: 1,
       rruleDays: null,

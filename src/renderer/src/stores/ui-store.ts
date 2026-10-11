@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { TaskStatusDto } from '../../../shared/ipc'
 
 /**
  * UI-only state (ADR-006, plan rule §2.6).
@@ -29,6 +30,12 @@ interface UiState {
   editingTaskId: string | null
   /** Id of the row the user selected, target of Ctrl+Enter. */
   selectedTaskId: string | null
+  /** Free text the user typed in the search box, before debouncing. */
+  searchQuery: string
+  /** Statuses the sidebar is filtering by. Empty means every status. */
+  statusFilter: TaskStatusDto[]
+  /** Tag ids the sidebar is filtering by. Empty means every task. */
+  tagFilter: string[]
   /** Switches the active view. */
   setView: (view: ViewMode) => void
   /** Opens a modal, remembering which task is being edited. */
@@ -37,6 +44,29 @@ interface UiState {
   closeDialog: () => void
   /** Selects a row, or clears the selection with `null`. */
   selectTask: (taskId: string | null) => void
+  /** Records what the user typed in the search box. */
+  setSearchQuery: (query: string) => void
+  /** Adds or removes a status from the filter. */
+  toggleStatusFilter: (status: TaskStatusDto) => void
+  /** Adds or removes a tag from the filter. */
+  toggleTagFilter: (tagId: string) => void
+  /** Clears the text, the status filter and the tag filter in one go. */
+  clearFilters: () => void
+}
+
+/**
+ * Adds or removes a value from a filter list.
+ *
+ * Selecting a second tag has to widen the result rather than narrow it, so this is a
+ * membership toggle and never an intersection — see the search test that pins the OR
+ * semantics.
+ *
+ * @param current Values currently selected.
+ * @param value The value to toggle.
+ * @returns The new list.
+ */
+function toggle<T>(current: T[], value: T): T[] {
+  return current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
 }
 
 /** The UI store. */
@@ -45,6 +75,9 @@ export const useUiStore = create<UiState>((set) => ({
   dialog: null,
   editingTaskId: null,
   selectedTaskId: null,
+  searchQuery: '',
+  statusFilter: [],
+  tagFilter: [],
 
   setView: (view) => set({ view }),
 
@@ -53,5 +86,14 @@ export const useUiStore = create<UiState>((set) => ({
 
   closeDialog: () => set({ dialog: null, editingTaskId: null }),
 
-  selectTask: (selectedTaskId) => set({ selectedTaskId })
+  selectTask: (selectedTaskId) => set({ selectedTaskId }),
+
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+
+  toggleStatusFilter: (status) =>
+    set((state) => ({ statusFilter: toggle(state.statusFilter, status) })),
+
+  toggleTagFilter: (tagId) => set((state) => ({ tagFilter: toggle(state.tagFilter, tagId) })),
+
+  clearFilters: () => set({ searchQuery: '', statusFilter: [], tagFilter: [] })
 }))

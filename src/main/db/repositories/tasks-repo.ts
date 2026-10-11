@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
+import { buildLikePattern, buildSearchText } from '../../core/search'
+import type { TagsRepository } from './tags-repo'
 import { AppError, APP_ERROR_MESSAGES } from '../../core/errors'
 import { toAuditTimestamp } from '../../core/datetime'
 import {
@@ -63,10 +65,34 @@ export interface CreateTaskInput {
   endMin: number | null
   estimateMin: number | null
   color: string | null
+  /** Tag names as typed; normalised by the tags repository. */
+  tags: string[]
 }
 
 /** Fields accepted when creating a task: the content plus its recurrence rule. */
 export type NewTaskInput = CreateTaskInput & RecurrenceInput
+
+/** A tag filter set to apply to a search. Every field is optional and means "no filter". */
+export interface TaskSearchFilter {
+  /** Text looked for in the title and notes; folded before matching. */
+  query?: string
+  /** Restrict to these statuses. */
+  statuses?: TaskStatus[]
+  /** Restrict to tasks carrying **any** of these tags. */
+  tagIds?: string[]
+  /** Maximum rows to return. */
+  limit?: number
+}
+
+/** A search result, with the real total even when the rows were cut short. */
+export interface TaskSearchResult {
+  /** The matching rows, newest day first. */
+  tasks: Task[]
+  /** How many rows matched in total. */
+  total: number
+  /** True when `total` exceeds `tasks.length`. */
+  truncated: boolean
+}
 
 /**
  * Fields a partial update may touch. Omitted keys keep their stored value.
@@ -77,6 +103,12 @@ export type NewTaskInput = CreateTaskInput & RecurrenceInput
 export interface UpdateTaskInput extends Partial<NewTaskInput> {
   status?: TaskStatus
 }
+
+/** Rows a search returns when the caller does not say. */
+const DEFAULT_SEARCH_LIMIT = 200
+
+/** Hard ceiling, mirroring MAX_SEARCH_RESULTS in the contract. */
+const MAX_SEARCH_LIMIT = 500
 
 /** Column list shared by every read, kept in one place so reads cannot drift. */
 const TASK_COLUMNS = `
@@ -125,9 +157,17 @@ function isWritableField(key: string): key is WritableTaskField {
  */
 export class TasksRepository {
   private readonly database: Database.Database
+  private readonly tags: TagsRepository
 
-  constructor(database: Database.Database) {
+  /**
+   * @param database An open database handle.
+   * @param tags Repository used to read and write a task's tags. Passed in rather than
+   *   built here so the IPC layer can hand the same instance to `tag:list`, and the two
+   *   can never disagree about what a tag is.
+   */
+  constructor(database: Database.Database, tags: TagsRepository) {
     this.database = database
+    this.tags = tags
   }
 
   /**
@@ -149,7 +189,7 @@ export class TasksRepository {
       )
       .all(taskDate) as TaskRow[]
 
-    return rows.map(toTask)
+    return this.attachTags(rows.map(toTask))
   }
 
   /**
@@ -181,7 +221,7 @@ export class TasksRepository {
       )
       .all(fromDate, toDate) as TaskRow[]
 
-    return rows.map(toTask)
+    return this.attachTags(rows.map(toTask))
   }
 
   /**
@@ -199,7 +239,9 @@ export class TasksRepository {
       throw new AppError('TASK_NOT_FOUND', APP_ERROR_MESSAGES.taskNotFound(), { field: 'id' })
     }
 
-    return toTask(row)
+    return this.tags
+      .listForTask(id)
+      .reduce<Task>((task, tag) => ({ ...task, tags: [...task.tags, tag.name] }), toTask(row))
   }
 
   /**
@@ -269,11 +311,11 @@ export class TasksRepository {
         `INSERT INTO tasks (
            id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
            rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-           created_at, updated_at, started_at, completed_at
+           created_at, updated_at, started_at, completed_at, search_text
          ) VALUES (
            @id, @title, @notes, @taskDate, 'pending', @startMin, @endMin, @estimateMin, @color,
            @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
-           @createdAt, @updatedAt, NULL, NULL
+           @createdAt, @updatedAt, NULL, NULL, @searchText
          )`
       )
       .run({
@@ -287,8 +329,11 @@ export class TasksRepository {
         color: input.color,
         ...toRecurrenceColumns(normalizeRecurrence(input)),
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        searchText: buildSearchText(input.title, input.notes)
       })
+
+    this.tags.setForTask(id, input.tags)
 
     return this.findById(id)
   }
@@ -361,8 +406,15 @@ export class TasksRepository {
 
     const changed = diffTaskForUpdate(current, candidate)
 
+    // Tags live in their own table, so an update that only changes them produces an empty
+    // `changed` and would fall through this shortcut without ever being applied. They are
+    // therefore written before it, and the shortcut only governs the `tasks` row.
     if (Object.keys(changed).length === 0) {
-      return current
+      if (input.tags !== undefined) {
+        this.tags.setForTask(id, input.tags)
+      }
+
+      return this.findById(id)
     }
 
     changed.updatedAt = now
@@ -377,7 +429,24 @@ export class TasksRepository {
       now
     )
 
-    this.writeUpdate(id, changed)
+    // One unit of work: the row, its tags and the derived search text either all land or
+    // none do. Three independent statements would leave the task's tags replaced while its
+    // row stayed stale if the process died between them — and a task whose tags say one
+    // thing and whose row says another is exactly the kind of drift nobody notices until
+    // it is expensive.
+    this.transaction(() => {
+      this.writeUpdate(id, changed)
+
+      // `search_text` is derived from title and notes, so it is never accepted from the
+      // caller: recomputing it here is what keeps the two from drifting.
+      this.database
+        .prepare('UPDATE tasks SET search_text = ? WHERE id = ?')
+        .run(buildSearchText(candidate.title, candidate.notes), id)
+
+      if (input.tags !== undefined) {
+        this.tags.setForTask(id, input.tags)
+      }
+    })
 
     return this.findById(id)
   }
@@ -396,6 +465,117 @@ export class TasksRepository {
     const result = this.database.prepare('DELETE FROM tasks WHERE id = ?').run(id)
 
     return result.changes > 0
+  }
+
+  /**
+   * Searches the whole history.
+   *
+   * Text matching runs against `search_text`, the folded copy built on write, because
+   * SQLite's `LIKE` ignores ASCII case and nothing at all — accents make a comparison the
+   * user would call broken. Filtering by tag and status stays in SQL.
+   *
+   * The `IN (...)` lists are built from `?` placeholders and bound parameters, never from
+   * interpolated values, so a tag id cannot reach the statement as SQL.
+   *
+   * @param filter Query, statuses, tag ids and limit. Every field is optional.
+   * @returns The matching rows plus the real total.
+   */
+  search(filter: TaskSearchFilter): TaskSearchResult {
+    const clauses: string[] = []
+    const parameters: unknown[] = []
+
+    const query = (filter.query ?? '').trim()
+
+    if (query.length > 0) {
+      clauses.push("search_text LIKE ? ESCAPE '\\'")
+      parameters.push(buildLikePattern(query))
+    }
+
+    const statuses = filter.statuses ?? []
+
+    if (statuses.length > 0) {
+      clauses.push(`status IN (${statuses.map(() => '?').join(', ')})`)
+      parameters.push(...statuses)
+    }
+
+    const tagIds = filter.tagIds ?? []
+
+    if (tagIds.length > 0) {
+      // "Any of these tags", which is what a filter sidebar means: selecting two tags
+      // widens the result rather than narrowing it to tasks carrying both.
+      clauses.push(
+        `EXISTS (
+           SELECT 1 FROM task_tags
+            WHERE task_tags.task_id = tasks.id
+              AND task_tags.tag_id IN (${tagIds.map(() => '?').join(', ')})
+         )`
+      )
+      parameters.push(...tagIds)
+    }
+
+    const where = clauses.length === 0 ? '' : `WHERE ${clauses.join('\n              AND ')}`
+    const limit = Math.min(filter.limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT)
+
+    const total = (
+      this.database.prepare(`SELECT COUNT(*) AS total FROM tasks ${where}`).get(...parameters) as {
+        total: number
+      }
+    ).total
+
+    const rows = this.database
+      .prepare(
+        `SELECT ${TASK_COLUMNS}
+           FROM tasks
+           ${where}
+          ORDER BY task_date DESC, (start_min IS NULL), start_min ASC, created_at DESC
+          LIMIT ?`
+      )
+      .all(...parameters, limit) as TaskRow[]
+
+    return {
+      tasks: this.attachTags(rows.map(toTask)),
+      total,
+      truncated: total > rows.length
+    }
+  }
+
+  /**
+   * Loads the tags of many tasks in one query.
+   *
+   * One query for the whole page rather than one per row: a day with thirty tasks would
+   * otherwise cost thirty round trips through `listForTask`.
+   *
+   * @param tasks Tasks to enrich, in the order they should come back.
+   * @returns The same tasks, each carrying its tags alphabetically.
+   */
+  private attachTags(tasks: Task[]): Task[] {
+    if (tasks.length === 0) {
+      return tasks
+    }
+
+    const rows = this.database
+      .prepare(
+        `SELECT tt.task_id, t.name
+           FROM task_tags tt
+           JOIN tags t ON t.id = tt.tag_id
+          WHERE tt.task_id IN (${tasks.map(() => '?').join(', ')})
+          ORDER BY t.name ASC`
+      )
+      .all(...tasks.map((task) => task.id)) as { task_id: string; name: string }[]
+
+    const byTask = new Map<string, string[]>()
+
+    for (const row of rows) {
+      const names = byTask.get(row.task_id)
+
+      if (names === undefined) {
+        byTask.set(row.task_id, [row.name])
+      } else {
+        names.push(row.name)
+      }
+    }
+
+    return tasks.map((task) => ({ ...task, tags: byTask.get(task.id) ?? [] }))
   }
 
   /**
@@ -540,6 +720,8 @@ function toTask(row: TaskRow): Task {
     endMin: row.end_min,
     estimateMin: row.estimate_min,
     color: row.color,
+    // Filled in by `attachTags`; a single row read carries none until it is looked up.
+    tags: [],
     rruleFreq: row.rrule_freq as RruleFreq,
     rruleInterval: row.rrule_interval,
     rruleDays: row.rrule_days === null ? null : row.rrule_days.split(',').map(Number),

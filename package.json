@@ -20,6 +20,7 @@
     "test:e2e": "playwright test",
     "smoke": "electron-vite build && node scripts/fase1-smoke.mjs",
     "smoke:ui": "electron-vite build && node scripts/fase2-smoke.mjs",
+    "smoke:tags": "electron-vite build && node scripts/fase3-smoke.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "dependencies": {

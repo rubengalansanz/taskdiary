@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { TaskDto, TaskStatusDto } from '../../../../shared/ipc'
-import { elapsedSeconds, formatClock, formatDuration } from '../../shared/lib/date'
+import { elapsedSeconds, formatClock, formatDayShort, formatDuration } from '../../shared/lib/date'
 import { Button } from '../../components/ui/button'
 
 /**
@@ -26,6 +26,8 @@ export interface TaskRowProps {
   task: TaskDto
   /** Whether this row holds keyboard focus. */
   isSelected: boolean
+  /** Shows the task's own date instead of its start time, for search results. */
+  showDate: boolean
   /** Requests a status change; rejections surface as a message. */
   onStatusChange: (status: TaskStatusDto) => void
   /** Opens the edit form for this task. */
@@ -43,6 +45,7 @@ export interface TaskRowProps {
 export function TaskRow({
   task,
   isSelected,
+  showDate,
   onStatusChange,
   onEdit,
   onDelete
@@ -66,8 +69,8 @@ export function TaskRow({
     >
       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
 
-      <span className="text-muted-foreground w-12 shrink-0 font-mono text-xs tabular-nums">
-        {formatClock(task.startMin)}
+      <span className="text-muted-foreground w-24 shrink-0 font-mono text-xs tabular-nums">
+        {showDate ? formatDayShort(task.taskDate) : formatClock(task.startMin)}
       </span>
 
       <span
@@ -75,6 +78,23 @@ export function TaskRow({
       >
         {task.title}
       </span>
+
+      {task.tags.length > 0 && (
+        <span className="hidden shrink-0 items-center gap-1 sm:flex">
+          {task.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              data-testid="task-tag"
+              className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-xs"
+            >
+              #{tag}
+            </span>
+          ))}
+          {task.tags.length > 3 && (
+            <span className="text-muted-foreground text-xs">+{task.tags.length - 3}</span>
+          )}
+        </span>
+      )}
 
       {running && <Stopwatch startedAt={task.startedAt} />}
 

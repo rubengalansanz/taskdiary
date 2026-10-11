@@ -12,6 +12,7 @@ import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { Textarea } from '../../components/ui/textarea'
 import { formatClock, parseClock } from '../../shared/lib/date'
+import { parseTagsFromText } from '../../../../shared/tags'
 import { createTaskRequestSchema, type TaskDto } from '../../../../shared/ipc'
 
 /**
@@ -47,11 +48,15 @@ export interface TaskFormProps {
 
 /** Fields the form collects. */
 export interface TaskFormValues {
+  /** Title with any `#tag` tokens removed. */
   title: string
+  /** Notes with any `#tag` tokens removed, or `null`. */
   notes: string | null
   startMin: number | null
   endMin: number | null
   estimateMin: number | null
+  /** Tag names found in the text, plus the ones the task already carried. */
+  tags: string[]
 }
 
 /** Seeds the clock field from a minute-of-day value. */
@@ -93,14 +98,26 @@ export function TaskForm({
 
     const estimateMin = estimate.trim() === '' ? null : Number(estimate)
 
+    // `#etiqueta` typed in either field becomes a tag. The token is removed from the text
+    // it was written in: a tag left written out in the notes is a tag the user can neither
+    // rename nor delete from the sidebar. Rejected tokens — `#412`, `#a` — stay put, so a
+    // GitHub issue reference still reads the way it was typed.
+    const parsedTitle = parseTagsFromText(title)
+    const parsedNotes = parseTagsFromText(notes)
+
+    const collected = [...parsedTitle.tags, ...parsedNotes.tags]
+    const existing = task?.tags ?? []
+    const tags = [...new Set([...existing, ...collected])]
+
     // The very schema the main process enforces, run here before the round trip. Same
     // rules, same messages: the user sees the rejection immediately, and the two layers
     // cannot drift because they are the same function. The main process still validates —
     // this is about saving a wait, not about trusting the renderer.
     const candidate = {
-      title,
-      notes: notes.trim() === '' ? null : notes,
+      title: parsedTitle.text,
+      notes: parsedNotes.text === '' ? null : parsedNotes.text,
       taskDate,
+      tags,
       startMin,
       endMin,
       estimateMin
@@ -121,12 +138,16 @@ export function TaskForm({
     setIsSaving(true)
 
     try {
+      // The values Zod returned, not the values that went in. `parsed.data` is the
+      // candidate after trim, length and range checks — submitting `parsedTitle.text`
+      // instead would quietly skip the trimming Zod just performed on the tags.
       await onSubmit({
-        title: title.trim(),
-        notes: notes.trim() === '' ? null : notes,
+        title: parsed.data.title,
+        notes: parsed.data.notes ?? null,
         startMin,
         endMin,
-        estimateMin
+        estimateMin,
+        tags: parsed.data.tags ?? tags
       })
       onClose()
     } catch (cause) {
@@ -159,6 +180,7 @@ export function TaskForm({
             <Label htmlFor="task-title">Título</Label>
             <Input
               id="task-title"
+              data-testid="task-title-input"
               ref={titleRef}
               value={title}
               maxLength={200}

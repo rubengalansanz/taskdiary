@@ -6,6 +6,7 @@ import {
   MENU_COMMAND_CHANNELS,
   type IpcChannel,
   type TaskDiaryApi,
+  type TagListResultDto,
   type TaskDiaryDbProbeResult
 } from '../shared/ipc'
 
@@ -58,7 +59,13 @@ const tasks: TaskDiaryApi['tasks'] = {
   create: (request) => invoke(IPC_CHANNELS.taskCreate, request),
   update: (request) => invoke(IPC_CHANNELS.taskUpdate, request),
   delete: (request) => invoke(IPC_CHANNELS.taskDelete, request),
-  setStatus: (request) => invoke(IPC_CHANNELS.taskSetStatus, request)
+  setStatus: (request) => invoke(IPC_CHANNELS.taskSetStatus, request),
+  search: (request) => invoke(IPC_CHANNELS.taskSearch, request)
+}
+
+/** Tag channels, grouped separately because they carry no payload. */
+const tagApi: TaskDiaryApi['tags'] = {
+  list: (): Promise<TagListResultDto> => invoke(IPC_CHANNELS.tagList)
 }
 
 const menu: TaskDiaryApi['menu'] = {
@@ -89,6 +96,7 @@ const taskDiary: TaskDiaryApi = {
       invoke<TaskDiaryDbProbeResult>(IPC_CHANNELS.dbProbe)
   },
   tasks,
+  tags: tagApi,
   menu,
   theme
 }

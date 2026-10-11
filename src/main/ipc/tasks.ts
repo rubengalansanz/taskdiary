@@ -11,7 +11,9 @@ import {
   normalizeTitle
 } from '../core/validation'
 import { type TasksRepository } from '../db/repositories/tasks-repo'
-import type { NewTaskInput, UpdateTaskInput } from '../db/repositories/tasks-repo'
+import type { NewTaskInput, TaskSearchFilter, UpdateTaskInput } from '../db/repositories/tasks-repo'
+import { type TagsRepository } from '../db/repositories/tags-repo'
+import { isValidTagName } from '../../shared/tags'
 import {
   createTaskRequestSchema,
   deleteTaskRequestSchema,
@@ -19,12 +21,15 @@ import {
   listTasksRequestSchema,
   setTaskStatusRequestSchema,
   updateTaskRequestSchema,
+  searchTasksRequestSchema,
   IPC_CHANNELS,
   type DeleteTaskRequest,
   type DeleteTaskResultDto,
   type ListTaskRangeRequest,
   type TaskDto,
   type TaskListResultDto,
+  type SearchTasksResultDto,
+  type TagListResultDto,
   type TaskResultDto,
   type UpdateTaskRequest
 } from '../../shared/ipc'
@@ -54,6 +59,10 @@ type TaskOk = Extract<TaskResultDto, { ok: true }>
 type TaskListOk = Extract<TaskListResultDto, { ok: true }>
 /** Failure half of every result: the discriminator the renderer branches on. */
 type FailureDto = Extract<TaskResultDto, { ok: false }>
+/** Success half of a search. */
+type SearchTasksOk = Extract<SearchTasksResultDto, { ok: true }>
+/** Success half of a tag listing. */
+type TagListOk = Extract<TagListResultDto, { ok: true }>
 
 /**
  * Turns a Zod failure into the `AppErrorDetails.fieldMessages` map.
@@ -160,6 +169,7 @@ function toNewTaskInput(request: z.infer<typeof createTaskRequestSchema>): NewTa
     endMin,
     estimateMin: assertEstimateMinutes(request.estimateMin ?? null),
     color: request.color ?? null,
+    tags: normalizeTags(request.tags),
     ...normalizeRecurrence({
       rruleFreq: request.rruleFreq ?? 'none',
       rruleInterval: request.rruleInterval ?? 1,
@@ -195,6 +205,7 @@ function toUpdateTaskInput(request: z.infer<typeof updateTaskRequestSchema>): Up
   }
   if (request.color !== undefined) input.color = request.color
   if (request.status !== undefined) input.status = request.status
+  if (request.tags !== undefined) input.tags = normalizeTags(request.tags)
 
   // Recurrence is validated as a unit: changing one field of a series changes the rule,
   // so defaults are applied for whichever ones the caller omitted.
@@ -219,14 +230,50 @@ function toUpdateTaskInput(request: z.infer<typeof updateTaskRequestSchema>): Up
 }
 
 /**
- * Registers every task channel against `repository`.
+ * Normalises a list of tags, rejecting unusable names.
  *
- * Called once at startup. Handlers close over the repository rather than reaching for a
+ * Throwing rather than dropping: silently discarding a tag the user typed means the task
+ * is saved without it and the user never finds out why it is missing.
+ *
+ * @param names Tag names as typed, or `undefined`.
+ * @returns The normalised, de-duplicated names.
+ * @throws AppError `VALIDATION_FAILED` when a name is not a usable tag.
+ */
+function normalizeTags(names: string[] | undefined): string[] {
+  if (names === undefined) {
+    return []
+  }
+
+  const normalized: string[] = []
+
+  for (const name of names) {
+    if (!isValidTagName(name)) {
+      throw new AppError(
+        'VALIDATION_FAILED',
+        `La etiqueta «${name}» no es válida: entre 2 y 40 caracteres, sin espacios.`,
+        { field: 'tags' }
+      )
+    }
+
+    if (!normalized.includes(name.trim().toLowerCase())) {
+      normalized.push(name)
+    }
+  }
+
+  return normalized
+}
+
+/**
+ * Registers every task and tag channel.
+ *
+ * Called once at startup. Handlers close over the repositories rather than reaching for a
  * module-level singleton, which keeps this function callable twice in tests.
  *
  * @param repository Repository bound to the open database.
+ * @param tags Tag repository, shared with the one the task repository uses so the two can
+ *   never disagree about what a tag is.
  */
-export function registerTaskIpcHandlers(repository: TasksRepository): void {
+export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsRepository): void {
   ipcMain.handle(
     IPC_CHANNELS.taskList,
     (_event: IpcMainInvokeEvent, payload: unknown): TaskListResultDto | FailureDto =>
@@ -302,5 +349,33 @@ export function registerTaskIpcHandlers(repository: TasksRepository): void {
           task: toTaskDto(repository.update(request.id, { status: request.status }))
         }
       })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.taskSearch,
+    (_event: IpcMainInvokeEvent, payload: unknown): SearchTasksResultDto | FailureDto =>
+      guard((): SearchTasksOk | FailureDto => {
+        const request = parseOrThrow(searchTasksRequestSchema, payload)
+
+        const filter: TaskSearchFilter = {
+          ...(request.query === undefined ? {} : { query: request.query }),
+          ...(request.statuses === undefined ? {} : { statuses: request.statuses }),
+          ...(request.tagIds === undefined ? {} : { tagIds: request.tagIds }),
+          ...(request.limit === undefined ? {} : { limit: request.limit })
+        }
+
+        const result = repository.search(filter)
+
+        return {
+          ok: true,
+          tasks: result.tasks.map(toTaskDto),
+          total: result.total,
+          truncated: result.truncated
+        }
+      })
+  )
+
+  ipcMain.handle(IPC_CHANNELS.tagList, (): TagListResultDto | FailureDto =>
+    guard((): TagListOk | FailureDto => ({ ok: true, tags: tags.listAll() }))
   )
 }

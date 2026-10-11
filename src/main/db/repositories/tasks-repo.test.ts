@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { openInMemoryDatabase } from '../database'
 import { runMigrations } from '../migrate'
 import { TasksRepository, type NewTaskInput } from './tasks-repo'
+import { TagsRepository } from './tags-repo'
 import { AppError } from '../../core/errors'
 import type Database from 'better-sqlite3'
 
@@ -22,7 +23,7 @@ let repository: TasksRepository
 beforeEach(() => {
   database = openInMemoryDatabase()
   runMigrations(database)
-  repository = new TasksRepository(database)
+  repository = new TasksRepository(database, new TagsRepository(database))
 })
 
 /** A minimal valid create payload, overridable per test. */
@@ -35,6 +36,7 @@ function newTask(overrides: Partial<NewTaskInput> = {}): NewTaskInput {
     endMin: 10 * 60,
     estimateMin: 60,
     color: null,
+    tags: [],
     rruleFreq: 'none',
     rruleInterval: 1,
     rruleDays: null,

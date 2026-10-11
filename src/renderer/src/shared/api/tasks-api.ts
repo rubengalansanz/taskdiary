@@ -1,4 +1,4 @@
-import type { AppErrorDto, TaskDto } from '../../../../shared/ipc'
+import type { AppErrorDto, SearchTasksRequest, TagDto, TaskDto } from '../../../../shared/ipc'
 
 /**
  * The renderer's view of the task API.
@@ -48,6 +48,17 @@ function unwrap<TResult extends { ok: true; tasks?: unknown } | { ok: true; task
   return result
 }
 
+/** Every tag in use, with how many tasks carry it. */
+export async function listTags(): Promise<TagDto[]> {
+  const result = await window.taskDiary.tags.list()
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result.tags
+}
+
 /** Tasks of one calendar day. */
 export async function listTasks(taskDate: string): Promise<TaskDto[]> {
   const result = await window.taskDiary.tasks.list({ taskDate })
@@ -74,6 +85,25 @@ export async function setTaskStatus(id: string, status: TaskStatusDto): Promise<
   const result = await window.taskDiary.tasks.setStatus({ id, status })
 
   return unwrap(result).task
+}
+
+/**
+ * Searches the whole history.
+ *
+ * @param request Query, statuses, tag ids and limit.
+ * @returns The matching tasks, the real total, and whether the list was cut short.
+ * @throws TaskApiError when the main process refuses the search.
+ */
+export async function searchTasks(
+  request: SearchTasksRequest
+): Promise<{ tasks: TaskDto[]; total: number; truncated: boolean }> {
+  const result = await window.taskDiary.tasks.search(request)
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return { tasks: result.tasks, total: result.total, truncated: result.truncated }
 }
 
 /** Deletes a task. */

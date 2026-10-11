@@ -150,10 +150,20 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ### Fase 3 · Etiquetas, búsqueda y filtros — 1 día
 
-- [ ] Tablas `tags` / `task_tags` + repositorio + canal `tag:*`
-- [ ] Parseo de `#etiqueta` al escribir en el editor
-- [ ] Panel lateral con filtros y contador de resultados
-- [ ] Búsqueda con Fuse.js (debounce de 150 ms) sobre título y notas
+- [x] Tablas `tags` / `task_tags` + repositorio + canal `tag:*`
+- [x] Parseo de `#etiqueta` al escribir en el editor
+- [x] Panel lateral con filtros y contador de resultados
+- [x] Búsqueda con debounce de 150 ms sobre título y notas
+
+> **Desviaciones documentadas.** (1) Las tablas ya existían desde `0001_init.sql`; la
+> fase es repositorio, canal y UI. (2) **La búsqueda es sobre todo el histórico**, no sobre
+> el rango visible: el plan se contradice entre el entregable («todo el histórico») y §14
+> («no toda la base»), y para ignorar acentos en SQL hacía falta o una columna
+> `search_text` normalizada (`0003`) o cargar el histórico en el renderer. Decidido con el
+> usuario el 2026-10-10: columna normalizada, límite de 500 filas. (3) **Fuse.js queda como
+> reordenador, no como filtro**: ya no es necesario para el fuzzy, porque el substring
+> plegado cubre el caso; el plan lo nominaba por la búsqueda difusa. El límite de 500 filas
+> es lo que mantiene acotada la memoria, como pedía §14.
 
 **Entregable:** filtrar y buscar en todo el histórico.
 
@@ -371,6 +381,10 @@ Definidas **30 días después de instalar la v1.0**.
 | ADR-016 | La fecha seleccionada vive en la URL (`#/day/:date`), no en Zustand | Aceptada (Fase 2) |
 | ADR-017 | La caché de tareas es un store externo con `useSyncExternalStore`, no estado de Zustand | Aceptada (Fase 2) |
 | ADR-018 | `started_at` se añade en `0002`; `0001` no se edita (§2.8) | Aceptada (Fase 2) |
+| ADR-019 | Columna derivada `search_text` para búsqueda sin acentos ni mayúsculas | Aceptada (Fase 3) |
+| ADR-020 | La búsqueda abarca todo el histórico, acotada a 500 filas | Aceptada (Fase 3) |
+| ADR-021 | Las reglas de etiqueta viven en `src/shared/tags.ts`, no en `main/core` | Aceptada (Fase 3) |
+| ADR-022 | Varias etiquetas significan OR, no AND | Aceptada (Fase 3) |
 
 ---
 

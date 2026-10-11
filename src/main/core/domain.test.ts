@@ -419,6 +419,7 @@ function buildTask(): Task {
     endMin: 600,
     estimateMin: 60,
     color: null,
+    tags: [],
     rruleFreq: 'none',
     rruleInterval: 1,
     rruleDays: null,

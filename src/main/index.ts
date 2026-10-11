@@ -6,6 +6,7 @@ import { resolveDatabasePath } from './core/database-path'
 import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/database'
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
+import { TagsRepository } from './db/repositories/tags-repo'
 import { registerTaskIpcHandlers } from './ipc/tasks'
 import { IPC_CHANNELS, type TaskDiaryDbProbeResult } from '../shared/ipc'
 
@@ -291,7 +292,12 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     registerIpcHandlers()
-    registerTaskIpcHandlers(new TasksRepository(database))
+
+    // One tag repository, handed to both the task repository and the IPC layer: they must
+    // not be able to disagree about what a tag is or whether one exists.
+    const tags = new TagsRepository(database)
+
+    registerTaskIpcHandlers(new TasksRepository(database, tags), tags)
 
     buildApplicationMenu()
     createWindow()

@@ -276,3 +276,31 @@ export function normalizeDateParam(candidate: string | undefined): string {
 
 /** Minutes in a day, exported for callers that need the bound. */
 export { MINUTES_PER_DAY }
+
+/** Short month names, for the compact date a search result shows. */
+const MONTH_SHORT = [
+  'ene',
+  'feb',
+  'mar',
+  'abr',
+  'may',
+  'jun',
+  'jul',
+  'ago',
+  'sep',
+  'oct',
+  'nov',
+  'dic'
+] as const
+
+/**
+ * Formats a day as `10 oct`, for a row whose day is not the one being viewed.
+ *
+ * @param value A valid `YYYY-MM-DD` string.
+ * @returns For example `10 oct`.
+ */
+export function formatDayShort(value: string): string {
+  const { month, day } = parts(value)
+
+  return `${day} ${MONTH_SHORT[month - 1] ?? ''}`
+}

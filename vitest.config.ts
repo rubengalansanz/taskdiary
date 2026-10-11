@@ -12,10 +12,15 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/main/**/*.test.ts', 'src/renderer/src/**/*.test.ts'],
+    include: ['src/main/**/*.test.ts', 'src/renderer/src/**/*.test.ts', 'src/shared/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/main/core/**', 'src/main/db/**', 'src/renderer/src/shared/lib/**'],
+      include: [
+        'src/main/core/**',
+        'src/main/db/**',
+        'src/renderer/src/shared/lib/**',
+        'src/shared/**'
+      ],
       reporter: ['text', 'lcov']
     }
   }

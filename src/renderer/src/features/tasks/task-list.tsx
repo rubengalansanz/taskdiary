@@ -5,9 +5,9 @@ import { formatDayHeading } from '../../shared/lib/date'
 /**
  * The Day view: a vertical timeline of one day's tasks.
  *
- * Owns no data. It receives the day's tasks and the callbacks, so it can be rendered
- * without a database or a bridge — which is what makes it testable and what keeps the
- * read path in one place.
+ * Owns no data. It receives the tasks to show and the callbacks, so it can be rendered
+ * without a database or a bridge — which is what makes it testable and what keeps the read
+ * path in one place.
  */
 
 /** Props of {@link TaskList}. */
@@ -18,6 +18,8 @@ export interface TaskListProps {
   tasks: TaskDto[] | null
   /** True while a read is in flight. */
   isLoading: boolean
+  /** True when the rows come from a search rather than from the day. */
+  searching: boolean
   /** Failure message from the last read, or `null`. */
   error: string | null
   /** Id of the selected row, target of Ctrl+Enter. */
@@ -33,13 +35,14 @@ export interface TaskListProps {
 /**
  * Renders the Day view.
  *
- * @param props Day, tasks and callbacks.
+ * @param props Tasks and callbacks.
  * @returns The view element.
  */
 export function TaskList({
   taskDate,
   tasks,
   isLoading,
+  searching,
   error,
   selectedTaskId,
   onStatusChange,
@@ -52,10 +55,19 @@ export function TaskList({
   return (
     <section className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">{formatDayHeading(taskDate)}</h1>
-        {total > 0 && (
+        <h1 className="text-xl font-semibold tracking-tight">
+          {searching ? 'Resultados' : formatDayHeading(taskDate)}
+        </h1>
+
+        {!searching && total > 0 && (
           <p className="text-muted-foreground text-sm">
             {done} de {total} completadas
+          </p>
+        )}
+
+        {searching && total > 0 && (
+          <p className="text-muted-foreground text-sm">
+            {total} {total === 1 ? 'tarea en el histórico' : 'tareas en el histórico'}
           </p>
         )}
       </header>
@@ -69,11 +81,26 @@ export function TaskList({
         </p>
       )}
 
-      {tasks === null && isLoading && (
-        <p className="text-muted-foreground text-sm">Cargando tareas…</p>
-      )}
+      {tasks === null && isLoading && <p className="text-muted-foreground text-sm">Cargando…</p>}
 
-      {tasks !== null && tasks.length === 0 && <EmptyState />}
+      {tasks !== null && tasks.length === 0 && !isLoading && (
+        <div className="border-border text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed p-10 text-center">
+          {searching ? (
+            <>
+              <p className="text-sm font-medium">Ninguna tarea coincide</p>
+              <p className="text-xs">Pruebe con otras palabras o quite algún filtro.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Todavía no hay tareas para este día</p>
+              <p className="text-xs">
+                Pulse <kbd className="bg-muted rounded px-1">Ctrl</kbd> +{' '}
+                <kbd className="bg-muted rounded px-1">N</kbd> para crear la primera.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {tasks !== null && tasks.length > 0 && (
         <ul className="space-y-1">
@@ -81,6 +108,9 @@ export function TaskList({
             <TaskRow
               key={task.id}
               task={task}
+              // A search result may belong to another day, so it shows its date where the
+              // day view would show nothing useful.
+              showDate={searching}
               isSelected={task.id === selectedTaskId}
               onStatusChange={(status) => onStatusChange(task, status)}
               onEdit={() => onEdit(task)}
@@ -90,25 +120,5 @@ export function TaskList({
         </ul>
       )}
     </section>
-  )
-}
-
-/**
- * Shown when the day has no tasks.
- *
- * Says what to do rather than apologising for an empty state: this app's whole reason to
- * exist is the friction of writing a task down.
- *
- * @returns The empty state element.
- */
-function EmptyState(): React.JSX.Element {
-  return (
-    <div className="border-border text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed p-10 text-center">
-      <p className="text-sm font-medium">Todavía no hay tareas para este día</p>
-      <p className="text-xs">
-        Pulse <kbd className="bg-muted rounded px-1">Ctrl</kbd> +{' '}
-        <kbd className="bg-muted rounded px-1">N</kbd> para crear la primera.
-      </p>
-    </div>
   )
 }
