@@ -8,6 +8,7 @@ import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
 import { TagsRepository } from './db/repositories/tags-repo'
 import { registerTaskIpcHandlers } from './ipc/tasks'
+import { registerDataIpcHandlers } from './ipc/data'
 import { IPC_CHANNELS, type TaskDiaryDbProbeResult } from '../shared/ipc'
 
 /** Size of the Phase 0 window, in device-independent pixels. */
@@ -297,7 +298,12 @@ if (!app.requestSingleInstanceLock()) {
     // not be able to disagree about what a tag is or whether one exists.
     const tags = new TagsRepository(database)
 
-    registerTaskIpcHandlers(new TasksRepository(database, tags), tags)
+    const tasks = new TasksRepository(database, tags)
+
+    registerTaskIpcHandlers(tasks, tags)
+    // Resolved per call rather than captured: the window does not exist yet here,
+    // and a dialog needs a parent to be modal to.
+    registerDataIpcHandlers(tasks, () => BrowserWindow.getAllWindows()[0])
 
     buildApplicationMenu()
     createWindow()

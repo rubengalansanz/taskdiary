@@ -91,12 +91,18 @@ const menu: TaskDiaryApi['menu'] = {
   }
 }
 
+const data: TaskDiaryApi['data'] = {
+  export: (request) => invoke(IPC_CHANNELS.dataExport, request),
+  import: (request) => invoke(IPC_CHANNELS.dataImport, request)
+}
+
 const taskDiary: TaskDiaryApi = {
   db: {
     probe: (): Promise<TaskDiaryDbProbeResult> =>
       invoke<TaskDiaryDbProbeResult>(IPC_CHANNELS.dbProbe)
   },
   tasks,
+  data,
   tags: tagApi,
   menu,
   theme

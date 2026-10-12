@@ -41,7 +41,7 @@ export function MonthView({ taskDate }: MonthViewProps): React.JSX.Element {
   const navigate = useNavigate()
   const month = startOfMonth(taskDate)
   const cells = useMemo(() => monthGrid(taskDate), [taskDate])
-  const { byDate } = useDaySummaries(cells[0].date, cells[cells.length - 1].date)
+  const { byDate, refresh } = useDaySummaries(cells[0].date, cells[cells.length - 1].date)
 
   const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
   const handleNavigate = useCallback(
@@ -65,6 +65,7 @@ export function MonthView({ taskDate }: MonthViewProps): React.JSX.Element {
         taskDate={taskDate}
         onNavigate={handleNavigate}
         onSelectView={handleSelectView}
+        onImported={() => refresh()}
       />
 
       <div className="flex min-h-0 flex-1">

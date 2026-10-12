@@ -1,6 +1,10 @@
 import type {
   AppErrorDto,
   DaySummaryDto,
+  ExportRequest,
+  ExportResultDto,
+  ImportRequest,
+  ImportResultDto,
   SearchTasksRequest,
   TagDto,
   TaskDto
@@ -81,6 +85,50 @@ export async function summarizeRange(fromDate: string, toDate: string): Promise<
   }
 
   return result.days
+}
+
+/**
+ * Writes the diary to a file the user picks.
+ *
+ * The renderer names a format, never a path. It does not learn where the file went — that
+ * is what keeps RNF-12 true: a renderer that could name a path would be a renderer that
+ * could read anything on the disk.
+ *
+ * @param request Which format to write.
+ * @returns Whether a file was written and how many tasks went into it.
+ * @throws TaskApiError when the write fails.
+ */
+export async function exportDiary(
+  request: ExportRequest
+): Promise<Extract<ExportResultDto, { ok: true }>> {
+  const result = await window.taskDiary.data.export(request)
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result
+}
+
+/**
+ * Reads tasks from a file the user picks.
+ *
+ * A refused file throws before anything is written, so the diary is untouched.
+ *
+ * @param request Which format to read.
+ * @returns Whether anything was imported and how many tasks landed.
+ * @throws TaskApiError when the file is refused or unreadable.
+ */
+export async function importDiary(
+  request: ImportRequest
+): Promise<Extract<ImportResultDto, { ok: true }>> {
+  const result = await window.taskDiary.data.import(request)
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result
 }
 
 /** Every tag in use, with how many tasks carry it. */

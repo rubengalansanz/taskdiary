@@ -6,6 +6,7 @@ import { AppError, APP_ERROR_MESSAGES } from '../../core/errors'
 import { toAuditTimestamp } from '../../core/datetime'
 import { occursOn } from '../../core/recurrence'
 import { addDays } from '../../core/date-arith'
+import type { TransferTask } from '../../core/transfer'
 import {
   diffTaskForUpdate,
   WRITABLE_TASK_FIELDS,
@@ -839,6 +840,119 @@ export class TasksRepository {
       .get(taskDate) as { total: number }
 
     return row.total
+  }
+
+  /**
+   * Every task in the diary, oldest first, as the transfer format.
+   *
+   * The export reads tags per row: one ordered scan for the tasks and one small query each
+   * for its tags. At the scale of a personal diary that is thousands of tiny prepared
+   * statements, which is the right trade against loading the whole `task_tags` table into
+   * memory to index it in JavaScript.
+   *
+   * @returns Every task, ready to serialise.
+   */
+  exportAll(): TransferTask[] {
+    const rows = this.database
+      .prepare(
+        `SELECT ${TASK_COLUMNS}
+           FROM tasks
+          ORDER BY task_date ASC, (start_min IS NULL), start_min ASC, created_at ASC`
+      )
+      .all() as TaskRow[]
+
+    return rows.map((row) => {
+      const task = toTask(row)
+
+      return {
+        title: task.title,
+        notes: task.notes,
+        taskDate: task.taskDate,
+        status: task.status,
+        startMin: task.startMin,
+        endMin: task.endMin,
+        estimateMin: task.estimateMin,
+        color: task.color,
+        tags: this.tags.listForTask(task.id).map((tag) => tag.name),
+        rruleFreq: task.rruleFreq,
+        rruleInterval: task.rruleInterval,
+        rruleDays: task.rruleDays,
+        rruleUntil: task.rruleUntil,
+        rruleFrom: task.rruleFrom,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt
+      }
+    })
+  }
+
+  /**
+   * Inserts a batch of transferred tasks, or none of them.
+   *
+   * One transaction around the whole batch. A partial import is the worst outcome available
+   * here: the user believes their diary came back, half of it did, and nothing records which
+   * half — so the gap surfaces weeks later with no way to tell what is missing.
+   *
+   * @param tasks Tasks that already passed validation.
+   * @returns How many were inserted.
+   * @throws AppError `DATABASE_ERROR` when any insert fails. Nothing is left behind.
+   */
+  importMany(tasks: TransferTask[]): number {
+    return this.transaction(() => {
+      let inserted = 0
+
+      for (const task of tasks) {
+        const id = randomUUID()
+        const now = toAuditTimestamp()
+
+        this.database
+          .prepare(
+            `INSERT INTO tasks (
+               id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
+               rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
+               created_at, updated_at, started_at, completed_at, search_text, series_id
+             ) VALUES (
+               @id, @title, @notes, @taskDate, @status, @startMin, @endMin, @estimateMin, @color,
+               @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
+               @createdAt, @createdAt, @startedAt, @completedAt, @searchText, @seriesId
+             )`
+          )
+          .run({
+            id,
+            // A transferred series keeps its own identity rather than joining an existing one.
+            // The file describes a diary, and merging two of them is a decision nobody asked
+            // for. `null` for a one-off keeps the unique index out of the way entirely.
+            seriesId: task.rruleFreq === 'none' ? null : id,
+            title: task.title,
+            notes: task.notes,
+            taskDate: task.taskDate,
+            status: task.status,
+            startMin: task.startMin,
+            endMin: task.endMin,
+            estimateMin: task.estimateMin,
+            color: task.color,
+            rruleFreq: task.rruleFreq,
+            rruleInterval: task.rruleInterval,
+            rruleDays: task.rruleDays === null ? null : task.rruleDays.join(','),
+            rruleUntil: task.rruleUntil,
+            rruleFrom: task.rruleFrom,
+            // Timestamps travel verbatim. Re-stamping them with "now" would make every
+            // imported task look like it was created and finished just now, quietly rewriting
+            // the history the export exists to preserve.
+            startedAt: task.startedAt,
+            completedAt: task.completedAt,
+            createdAt: task.startedAt ?? task.completedAt ?? now,
+            searchText: buildSearchText(task.title, task.notes)
+          })
+
+        if (task.tags.length > 0) {
+          this.tags.setForTask(id, task.tags)
+        }
+
+        inserted += 1
+      }
+
+      return inserted
+    })
   }
 
   /**

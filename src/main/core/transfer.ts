@@ -289,6 +289,20 @@ function validateTask(entry: unknown): string | null {
     }
   }
 
+  // The domain requires an integer between 1 and 52 (`normalizeRecurrence`). A CSV cell that
+  // is not a number becomes NaN, and NaN fails every comparison it is asked about — which is
+  // how a nonsense interval used to pass validation and reach the repository.
+  if (task.rruleInterval !== undefined && task.rruleInterval !== null) {
+    if (
+      typeof task.rruleInterval !== 'number' ||
+      !Number.isInteger(task.rruleInterval) ||
+      task.rruleInterval < 1 ||
+      task.rruleInterval > 52
+    ) {
+      return `el campo "rruleInterval" vale "${describeValue(task.rruleInterval)}" y debe ser un entero entre 1 y 52`
+    }
+  }
+
   if (task.rruleDays !== undefined && task.rruleDays !== null && !Array.isArray(task.rruleDays)) {
     return 'el campo "rruleDays" no es una lista'
   }
@@ -454,23 +468,18 @@ export function parseImportCsv(text: string): ImportResult {
       record[name] = row[column] ?? ''
     }
 
-    const candidate = {
-      title: (record.title ?? '').trim(),
-      notes: emptyToNull(record.notes),
-      taskDate: (record.taskDate ?? '').trim(),
-      status: (record.status ?? '').trim() || 'pending',
-      startMin: parseOptionalMinute(record.startMin, 'startMin', index + 2),
-      endMin: parseOptionalMinute(record.endMin, 'endMin', index + 2),
-      estimateMin: parseOptionalMinute(record.estimateMin, 'estimateMin', index + 2),
-      color: emptyToNull(record.color),
-      tags: parseTags(record.tags),
-      rruleFreq: ((record.rruleFreq ?? '').trim() || 'none') as TransferTask['rruleFreq'],
-      rruleInterval: Number((record.rruleInterval ?? '').trim() || '1'),
-      rruleDays: parseWeekdays(record.rruleDays),
-      rruleUntil: emptyToNull(record.rruleUntil),
-      rruleFrom: emptyToNull(record.rruleFrom),
-      startedAt: emptyToNull(record.startedAt),
-      completedAt: emptyToNull(record.completedAt)
+    let candidate: TransferTask
+
+    try {
+      candidate = buildCsvTask(record, index + 2)
+    } catch (cause) {
+      // `parseOptionalMinute` raises on a cell that is not a number. Letting that escape
+      // would break the `ImportResult` contract and turn a bad row into an exception the
+      // user never sees, instead of the refusal they can act on.
+      return {
+        ok: false,
+        error: `La fila ${index + 2} no es válida: ${cause instanceof Error ? cause.message : 'valor ilegible'}. No se ha importado nada, para que el archivo no quede a medias.`
+      }
     }
 
     const problem = validateTask(candidate)
@@ -482,10 +491,46 @@ export function parseImportCsv(text: string): ImportResult {
       }
     }
 
-    tasks.push(candidate as TransferTask)
+    tasks.push(candidate)
   }
 
   return { ok: true, tasks }
+}
+
+/**
+ * Builds one task from a CSV record.
+ *
+ * Separate from {@link parseImportCsv} so the caller can guard it: the minute reader raises
+ * on a malformed cell, and a raise that escapes would turn "your file has a typo in row 4"
+ * into an exception nobody catches.
+ *
+ * @param record One row, keyed by header name.
+ * @param rowNumber Row number, for the error message.
+ * @returns The task, ready to validate.
+ * @throws Error When a numeric cell cannot be read.
+ */
+function buildCsvTask(record: Record<string, string>, rowNumber: number): TransferTask {
+  return {
+    title: (record.title ?? '').trim(),
+    notes: emptyToNull(record.notes),
+    taskDate: (record.taskDate ?? '').trim(),
+    status: ((record.status ?? '').trim() || 'pending') as TransferTask['status'],
+    startMin: parseOptionalMinute(record.startMin, 'startMin', rowNumber),
+    endMin: parseOptionalMinute(record.endMin, 'endMin', rowNumber),
+    estimateMin: parseOptionalMinute(record.estimateMin, 'estimateMin', rowNumber),
+    color: emptyToNull(record.color),
+    tags: parseTags(record.tags),
+    rruleFreq: ((record.rruleFreq ?? '').trim() || 'none') as TransferTask['rruleFreq'],
+    // Left as NaN when the cell is unreadable, so `validateTask` refuses it with the value in
+    // the message. Defaulting it to 1 here would silently repair a typo into a schedule that
+    // is not the one the file describes.
+    rruleInterval: Number((record.rruleInterval ?? '').trim() || '1'),
+    rruleDays: parseWeekdays(record.rruleDays),
+    rruleUntil: emptyToNull(record.rruleUntil),
+    rruleFrom: emptyToNull(record.rruleFrom),
+    startedAt: emptyToNull(record.startedAt),
+    completedAt: emptyToNull(record.completedAt)
+  }
 }
 
 /**
@@ -672,8 +717,13 @@ function parseTags(value: string | undefined): string[] {
 /**
  * Reads a weekday cell.
  *
+ * Nothing is dropped. `1,banana,5` used to become `[1, 5]` — the silent subset this module
+ * exists to refuse everywhere else, hiding a typo that then schedules the series on the
+ * wrong days.
+ *
  * @param value The raw cell, as `1,3,5`.
- * @returns The ISO weekdays, or `null`.
+ * @returns The ISO weekdays, or `null` when the cell is empty.
+ * @throws Error When an entry is not a weekday.
  */
 function parseWeekdays(value: string | undefined): number[] | null {
   const trimmed = (value ?? '').trim()
@@ -682,10 +732,13 @@ function parseWeekdays(value: string | undefined): number[] | null {
     return null
   }
 
-  const days = trimmed
-    .split(/[,;|]/)
-    .map((day) => Number(day.trim()))
-    .filter((day) => Number.isInteger(day))
+  return trimmed.split(/[,;|]/).map((day) => {
+    const parsed = Number(day.trim())
 
-  return days.length === 0 ? null : days
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 7) {
+      throw new Error(`el campo "rruleDays" contiene "${day.trim()}" y solo admite números del 1 al 7`)
+    }
+
+    return parsed
+  })
 }

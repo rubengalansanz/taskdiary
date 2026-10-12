@@ -419,3 +419,87 @@ describe('parseImportCsv', () => {
     }
   })
 })
+
+describe('the CSV reader honours its own contract', () => {
+  // All three of these were holes the JSON path did not have, found by review:
+  // `parseOptionalMinute` raises, the CSV loop never caught it, `rruleInterval` was never
+  // checked, and `parseWeekdays` dropped what it could not read. The JSON parser refuses
+  // cleanly; the CSV parser used to throw, silently repair, or silently truncate.
+
+  it('never throws, whatever it is handed', () => {
+    for (const payload of [
+      '',
+      '\n\n',
+      'title,taskDate',
+      'title,taskDate\n,',
+      'title,taskDate\nSolo el titulo',
+      '"sin cerrar,comillas,2026-10-05',
+      'title,taskDate,startMin\nTarea,2026-10-05,abc'
+    ]) {
+      expect(() => parseImportCsv(payload)).not.toThrow()
+    }
+  })
+
+  it('refuses a non-numeric minute cell instead of throwing', () => {
+    const result = parseImportCsv('title,taskDate,startMin\nTarea,2026-10-05,abc')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('startMin')
+      expect(result.error).toContain('2')
+    }
+  })
+
+  it('refuses a nonsense recurrence interval rather than defaulting it to 1', () => {
+    // Defaulting repairs the typo into a schedule the file does not describe, and the user
+    // finds out weeks later. The domain requires an integer between 1 and 52.
+    const result = parseImportCsv(
+      'title,taskDate,rruleFreq,rruleInterval\nTarea,2026-10-05,weekly,abc'
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('rruleInterval')
+    }
+  })
+
+  it('refuses an interval outside the range the domain allows', () => {
+    expect(parseImportCsv('title,taskDate,rruleFreq,rruleInterval\nT,2026-10-05,daily,0').ok).toBe(
+      false
+    )
+    expect(
+      parseImportCsv('title,taskDate,rruleFreq,rruleInterval\nT,2026-10-05,daily,53').ok
+    ).toBe(false)
+  })
+
+  it('refuses a weekday cell it cannot read, instead of dropping the rest', () => {
+    // `1,banana,5` used to import as [1, 5] without a word — the silent subset this module
+    // exists to refuse everywhere else, hiding a typo that reschedules the whole series.
+    const result = parseImportCsv(
+      'title,taskDate,rruleFreq,rruleDays\nT,2026-10-05,weekly,"1,banana,5"'
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('banana')
+    }
+  })
+
+  it('refuses an out-of-range weekday', () => {
+    const result = parseImportCsv('title,taskDate,rruleFreq,rruleDays\nT,2026-10-05,weekly,"1,9"')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('rruleDays')
+    }
+  })
+
+  it('rejects the whole file when a later row is unreadable', () => {
+    const result = parseImportCsv(
+      'title,taskDate,startMin\nBuena,2026-10-05,540\nMala,2026-10-06,xyz'
+    )
+
+    expect(result.ok).toBe(false)
+    expect((result as { tasks?: unknown }).tasks).toBeUndefined()
+  })
+})

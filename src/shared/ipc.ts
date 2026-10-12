@@ -428,6 +428,10 @@ export const IPC_CHANNELS = {
   taskSetStatus: 'taskdiary:task:set-status',
   /** Phase 3: search the whole history by text, tags and status. */
   taskSearch: 'taskdiary:task:search',
+  /** Phase 5: write the whole diary to a file the user picks. */
+  dataExport: 'taskdiary:data:export',
+  /** Phase 5: read tasks from a file the user picks. */
+  dataImport: 'taskdiary:data:import',
   /** Phase 3: every tag in use, with how many tasks carry it. */
   tagList: 'taskdiary:tag:list',
   /**
@@ -478,6 +482,66 @@ export interface TaskApi {
   setStatus(request: { id: string; status: TaskStatusDto }): Promise<TaskResultDto>
   /** Searches the whole history by text, tags and status. */
   search(request: SearchTasksRequest): Promise<SearchTasksResultDto>
+}
+
+/** Format an export is written in. */
+export const exportFormatSchema = z.enum(['json', 'markdown'])
+
+/** Request for `data:export`. Opens a native save dialog, so it carries no path. */
+export const exportRequestSchema = z.object({
+  format: exportFormatSchema
+})
+
+/** Request for `data:import`. Opens a native open dialog, so it carries no path. */
+export const importRequestSchema = z.object({
+  format: z.enum(['json', 'csv'])
+})
+
+/** Result of `data:export`. `cancelled` is not a failure. */
+export const exportResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    /** False when the user closed the dialog without choosing. */
+    written: z.boolean(),
+    /** How many tasks went into the file. */
+    taskCount: z.number().int().min(0)
+  }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** Result of `data:import`. */
+export const importResultSchema = z.discriminatedUnion('ok', [
+  z.object({
+    ok: z.literal(true),
+    /** False when the user closed the dialog without choosing. */
+    imported: z.boolean(),
+    /** How many tasks were written to the diary. */
+    taskCount: z.number().int().min(0)
+  }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** Request for `data:export`. */
+export type ExportRequest = z.infer<typeof exportRequestSchema>
+/** Request for `data:import`. */
+export type ImportRequest = z.infer<typeof importRequestSchema>
+/** Result of `data:export`. */
+export type ExportResultDto = z.infer<typeof exportResultSchema>
+/** Result of `data:import`. */
+export type ImportResultDto = z.infer<typeof importResultSchema>
+
+/** Import and export, over native file dialogs. */
+export interface DataApi {
+  /**
+   * Writes the whole diary to a file the user picks.
+   *
+   * No path crosses the bridge in either direction: the renderer asks for a format, the main
+   * process opens the dialog, and the renderer never learns where the file went. That is what
+   * keeps RNF-12 true — the renderer has no filesystem access, not even a restricted one.
+   */
+  export(request: ExportRequest): Promise<ExportResultDto>
+  /** Reads tasks from a file the user picks. A rejected file changes nothing. */
+  import(request: ImportRequest): Promise<ImportResultDto>
 }
 
 /** Tag channels, grouped apart because they carry no payload. */
@@ -551,6 +615,8 @@ export interface TaskDiaryApi {
   }
   /** Phase 1 task CRUD, plus the Phase 3 search. */
   tasks: TaskApi
+  /** Phase 5 import and export, over native file dialogs. */
+  data: DataApi
   /** Phase 3 tags. */
   tags: TagApi
   /** Phase 2 native menu accelerators. */

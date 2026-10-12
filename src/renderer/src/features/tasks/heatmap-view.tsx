@@ -52,7 +52,7 @@ export function HeatmapView({ taskDate }: HeatmapViewProps): React.JSX.Element {
   )
 
   const days = useMemo(() => heatmapRange(taskDate), [taskDate])
-  const { byDate } = useDaySummaries(days[0], days[days.length - 1])
+  const { byDate, refresh } = useDaySummaries(days[0], days[days.length - 1])
 
   const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
 
@@ -75,6 +75,7 @@ export function HeatmapView({ taskDate }: HeatmapViewProps): React.JSX.Element {
         taskDate={taskDate}
         onNavigate={handleNavigate}
         onSelectView={handleSelectView}
+        onImported={() => refresh()}
       />
 
       <div className="flex min-h-0 flex-1">

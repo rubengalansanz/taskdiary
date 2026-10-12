@@ -2,6 +2,7 @@ import { useUiStore } from '../stores/ui-store'
 import { VIEW_LABELS, VIEW_MODES, type ViewMode } from '../routes/view-mode'
 import { addDays, addMonths, today } from '../shared/lib/date'
 import { Button } from '../components/ui/button'
+import { DataMenu } from './data-menu'
 
 /**
  * Top bar: navigate between days, jump to today, and switch views.
@@ -39,6 +40,8 @@ export interface TitleBarProps {
   onNavigate: (taskDate: string) => void
   /** Switches view, keeping the day. */
   onSelectView: (view: ViewMode) => void
+  /** Called after an import, so whatever is on screen reloads what just changed. */
+  onImported?: () => void
 }
 
 /**
@@ -51,7 +54,8 @@ export function TitleBar({
   view,
   taskDate,
   onNavigate,
-  onSelectView
+  onSelectView,
+  onImported
 }: TitleBarProps): React.JSX.Element {
   const openDialog = useUiStore((state) => state.openDialog)
   const step = NAV_STEP[view]
@@ -125,7 +129,9 @@ export function TitleBar({
         ))}
       </div>
 
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        {onImported !== undefined && <DataMenu onImported={onImported} />}
+
         <Button size="sm" onClick={() => openDialog('create')}>
           Nueva tarea
         </Button>

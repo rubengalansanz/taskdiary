@@ -35,7 +35,7 @@ export interface WeekViewProps {
 export function WeekView({ taskDate }: WeekViewProps): React.JSX.Element {
   const navigate = useNavigate()
   const days = useMemo(() => weekDates(taskDate), [taskDate])
-  const { byDate } = useDaySummaries(days[0], days[days.length - 1])
+  const { byDate, refresh } = useDaySummaries(days[0], days[days.length - 1])
 
   const visibleCount = useMemo(() => countTasks(byDate.values()), [byDate])
 
@@ -60,6 +60,7 @@ export function WeekView({ taskDate }: WeekViewProps): React.JSX.Element {
         taskDate={taskDate}
         onNavigate={handleNavigate}
         onSelectView={handleSelectView}
+        onImported={() => refresh()}
       />
 
       <div className="flex min-h-0 flex-1">

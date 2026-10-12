@@ -238,6 +238,13 @@ export function DayRoute(): React.JSX.Element {
         taskDate={taskDate}
         onNavigate={handleNavigate}
         onSelectView={handleSelectView}
+        onImported={() => {
+          invalidateDate(taskDate)
+          invalidateSearches()
+          invalidateTags()
+          invalidateSummaries()
+          refresh()
+        }}
       />
 
       <div className="flex min-h-0 flex-1">

@@ -1,6 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { z } from 'zod'
-import { APP_ERROR_MESSAGES, AppError, toAppErrorDto } from '../core/errors'
+import { AppError } from '../core/errors'
+import { guard, parseOrThrow, type FailureDto } from './guard'
 import {
   assertEstimateMinutes,
   assertLocalDate,
@@ -59,85 +60,12 @@ import type { Task } from '../core/task'
 type TaskOk = Extract<TaskResultDto, { ok: true }>
 /** Success half of a task-list result. */
 type TaskListOk = Extract<TaskListResultDto, { ok: true }>
-/** Failure half of every result: the discriminator the renderer branches on. */
-type FailureDto = Extract<TaskResultDto, { ok: false }>
 /** Success half of a search. */
 type SearchTasksOk = Extract<SearchTasksResultDto, { ok: true }>
 /** Success half of a tag listing. */
 type TagListOk = Extract<TagListResultDto, { ok: true }>
 /** Success half of a per-day aggregation. */
 type SummarizeRangeOk = Extract<SummarizeRangeResultDto, { ok: true }>
-
-/**
- * Turns a Zod failure into the `AppErrorDetails.fieldMessages` map.
- *
- * Each issue carries the dotted path of the offending field and a message. Grouping by
- * field gives the renderer something it can place next to the input that failed.
- *
- * @param error The Zod error.
- * @returns Messages keyed by field path.
- */
-function toFieldMessages(error: z.ZodError): Record<string, string> {
-  const messages: Record<string, string> = {}
-
-  for (const issue of error.issues) {
-    const field = issue.path.length === 0 ? 'payload' : issue.path.join('.')
-    messages[field] ??= issue.message
-  }
-
-  return messages
-}
-
-/**
- * Parses `payload` with `schema`, or throws a `VALIDATION_FAILED` `AppError`.
- *
- * @param schema The Zod schema guarding this channel.
- * @param payload Raw value received from the renderer.
- * @returns The parsed value.
- * @throws AppError `VALIDATION_FAILED`, carrying per-field messages.
- */
-function parseOrThrow<TSchema extends z.ZodType>(
-  schema: TSchema,
-  payload: unknown
-): z.infer<TSchema> {
-  const result = schema.safeParse(payload)
-
-  if (!result.success) {
-    const fieldMessages = toFieldMessages(result.error)
-
-    throw new AppError(
-      'VALIDATION_FAILED',
-      APP_ERROR_MESSAGES.validationFailed({ fieldMessages }),
-      {
-        fieldMessages
-      }
-    )
-  }
-
-  return result.data
-}
-
-/**
- * Runs `work` and converts any throw into a failed result.
- *
- * The failure is wrapped as `{ ok: false, error }` — the same discriminator the success
- * half carries. Returning the bare `AppErrorDto` instead would leave the renderer with
- * no `ok` to branch on, forcing a `code in result` check that the discriminated union in
- * the contract exists to make unnecessary.
- *
- * Not `async`: every step below is synchronous, because `better-sqlite3` is. Marking it
- * async would add a microtask hop to every channel for nothing.
- *
- * @param work The handler body.
- * @returns Whatever `work` returned, or a failure DTO.
- */
-function guard<TResult>(work: () => TResult): TResult | FailureDto {
-  try {
-    return work()
-  } catch (cause) {
-    return { ok: false, error: toAppErrorDto(cause) }
-  }
-}
 
 /**
  * Projects the domain model onto the wire shape.
