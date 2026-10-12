@@ -31,9 +31,6 @@ export interface DataMenuProps {
 /** One line of feedback, or none. */
 type Notice = { tone: 'error' | 'info'; message: string } | null
 
-/** Which operation holds the trigger, or none. */
-type BusyState = 'export-json' | 'export-markdown' | 'import-json' | 'import-csv' | null
-
 /**
  * Renders the import and export controls.
  *
@@ -41,7 +38,11 @@ type BusyState = 'export-json' | 'export-markdown' | 'import-json' | 'import-csv
  * @returns The menu element.
  */
 export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
-  const [busy, setBusy] = useState<BusyState>(null)
+  // A boolean, not a union naming which operation is in flight. The native dialog is modal, so
+  // the menu has already closed and the trigger is the only thing left to disable: there is no
+  // screen on which to show *which* one is running, and no branch that would read it. A
+  // five-value union described a distinction this component never made.
+  const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(null)
 
   /**
@@ -51,8 +52,8 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
    * the call site lost the discriminated union on the way through, and `result.written` became
    * a type error on a perfectly good API.
    */
-  const run = useCallback(async (what: BusyState, work: () => Promise<void>): Promise<void> => {
-    setBusy(what)
+  const run = useCallback(async (work: () => Promise<void>): Promise<void> => {
+    setBusy(true)
     setNotice(null)
 
     try {
@@ -64,13 +65,13 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           cause instanceof TaskApiError ? cause.message : 'No se pudo completar la operación.'
       })
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }, [])
 
   const doExport = useCallback(
     (format: 'json' | 'markdown') =>
-      void run(`export-${format}`, async () => {
+      void run(async () => {
         const result = await exportDiary({ format })
 
         setNotice(
@@ -84,7 +85,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
 
   const doImport = useCallback(
     (format: 'json' | 'csv') =>
-      void run(`import-${format}`, async () => {
+      void run(async () => {
         const result = await importDiary({ format })
 
         if (result.imported) {
@@ -102,7 +103,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <Button
             variant="ghost"
             size="sm"
-            disabled={busy !== null}
+            disabled={busy}
             data-testid="data-menu-trigger"
             aria-label="Importar y exportar"
           >
@@ -114,14 +115,14 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <DropdownMenuLabel>Exportar</DropdownMenuLabel>
           <DropdownMenuItem
             data-testid="data-export-json"
-            disabled={busy !== null}
+            disabled={busy}
             onSelect={() => doExport('json')}
           >
             Como JSON
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="data-export-markdown"
-            disabled={busy !== null}
+            disabled={busy}
             onSelect={() => doExport('markdown')}
           >
             Como Markdown
@@ -132,14 +133,14 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <DropdownMenuLabel>Importar</DropdownMenuLabel>
           <DropdownMenuItem
             data-testid="data-import-json"
-            disabled={busy !== null}
+            disabled={busy}
             onSelect={() => doImport('json')}
           >
             Desde JSON
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="data-import-csv"
-            disabled={busy !== null}
+            disabled={busy}
             onSelect={() => doImport('csv')}
           >
             Desde CSV
