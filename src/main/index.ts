@@ -14,6 +14,10 @@ import { IPC_CHANNELS, type TaskDiaryDbProbeResult } from '../shared/ipc'
 /** Size of the Phase 0 window, in device-independent pixels. */
 const WINDOW_WIDTH = 1100
 const WINDOW_HEIGHT = 720
+/** Narrowest the layout stays usable at. */
+const MIN_WINDOW_WIDTH = 720
+/** Shortest the layout stays usable at. */
+const MIN_WINDOW_HEIGHT = 480
 
 /**
  * Window and body background colours, used before any CSS is parsed so a dark-mode
@@ -188,6 +192,13 @@ function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
+    // Below this the layout stops being a diary and starts being a puzzle: the 240px sidebar
+    // plus a readable content column is already most of it, and the title bar's three groups
+    // wrap into three rows that push the day off screen. A minimum is the honest answer —
+    // the alternative is letting the user shrink until the app is unusable, with no way back
+    // except knowing the shortcut.
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     backgroundColor,
     ...(process.platform === 'linux' ? { icon } : {}),

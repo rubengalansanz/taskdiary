@@ -74,50 +74,68 @@ export function TitleBar({
   }
 
   return (
-    <header className="border-border flex items-center gap-2 border-b px-4 py-3">
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label="Periodo anterior"
-        disabled={!canStep}
-        onClick={() => shift(-1, taskDate)}
-      >
-        ‹
-      </Button>
-
-      {view === 'day' && (
-        <>
-          <Button variant="ghost" size="sm" onClick={() => shift(-1, today())}>
-            Ayer
-          </Button>
-
-          <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
-            Hoy
-          </Button>
-
-          <Button variant="ghost" size="sm" onClick={() => shift(1, today())}>
-            Mañana
-          </Button>
-        </>
-      )}
-
-      {view !== 'day' && view !== 'stats' && (
-        <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
-          {view === 'week' ? 'Semana actual' : 'Mes actual'}
+    // Three clusters that wrap between each other, never inside.
+    //
+    // The bar used to be one flex row of fifteen fixed-width buttons. It needed 1241px and had
+    // 1084, so it overflowed and pushed a horizontal scrollbar onto the whole window. Grouping
+    // means the only thing that can give way is a *gap between groups*: no cluster ever splits,
+    // and nothing is ever clipped or hidden behind a `hidden sm:flex`.
+    //
+    // `flex-wrap` rather than horizontal scrolling because a toolbar that scrolls sideways
+    // hides the view switcher behind an edge nobody thinks to look for. Wrapping costs one
+    // extra row at widths the app is unlikely to be used at, and costs nothing at 1100.
+    <header
+      data-testid="title-bar"
+      className="border-border flex flex-wrap items-center gap-x-2 gap-y-2 border-b px-4 py-3"
+    >
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Periodo anterior"
+          disabled={!canStep}
+          onClick={() => shift(-1, taskDate)}
+        >
+          ‹
         </Button>
-      )}
 
-      <Button
-        variant="outline"
-        size="icon"
-        aria-label="Periodo siguiente"
-        disabled={!canStep}
-        onClick={() => shift(1, taskDate)}
+        {view === 'day' && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => shift(-1, today())}>
+              Ayer
+            </Button>
+
+            <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
+              Hoy
+            </Button>
+
+            <Button variant="ghost" size="sm" onClick={() => shift(1, today())}>
+              Mañana
+            </Button>
+          </>
+        )}
+
+        {view !== 'day' && view !== 'stats' && (
+          <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
+            {view === 'week' ? 'Semana actual' : 'Mes actual'}
+          </Button>
+        )}
+
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Periodo siguiente"
+          disabled={!canStep}
+          onClick={() => shift(1, taskDate)}
+        >
+          ›
+        </Button>
+      </div>
+
+      <div
+        data-testid="view-switcher"
+        className="bg-muted flex shrink-0 items-center gap-1 rounded-md p-0.5"
       >
-        ›
-      </Button>
-
-      <div className="bg-muted flex items-center gap-1 rounded-md p-0.5">
         {VIEW_MODES.map((mode) => (
           <Button
             key={mode}
@@ -131,7 +149,7 @@ export function TitleBar({
         ))}
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex min-w-0 shrink items-center gap-2">
         {onImported !== undefined && <DataMenu onImported={onImported} />}
 
         <Button size="sm" onClick={() => openDialog('create')}>

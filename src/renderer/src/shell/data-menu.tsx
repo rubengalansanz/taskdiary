@@ -1,17 +1,25 @@
 import { useCallback, useState } from 'react'
 import { exportDiary, importDiary, TaskApiError } from '../shared/api/tasks-api'
 import { Button } from '../components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '../components/ui/dropdown-menu'
 
 /**
- * Import and export controls.
+ * Import and export, behind one menu.
  *
- * Four buttons rather than a settings screen, because the plan puts backup in Ajustes and
- * this phase does not ship one. They live in the title bar so the diary can be taken
- * somewhere before anything else happens to the disk.
+ * These used to be four flat buttons in the title bar, and they were 558 of the bar's 1241
+ * pixels — 44% of the toolbar spent on actions a user performs a handful of times a year.
+ * That is not a width problem, it is an altitude problem: saving a copy of your diary does
+ * not belong at the same level as the arrows that move you through it.
  *
- * Neither button can name a file. Each opens the native dialog, and each reports what
- * actually happened — including "you closed the dialog", which is not a failure and must not
- * be dressed as one.
+ * Closing the dialog is a choice, not an error. Reporting "exportado" then would be a lie the
+ * user has to disprove by opening the folder, so a cancelled dialog reports nothing.
  */
 
 /** Props of {@link DataMenu}. */
@@ -23,21 +31,21 @@ export interface DataMenuProps {
 /** One line of feedback, or none. */
 type Notice = { tone: 'error' | 'info'; message: string } | null
 
-/** Which operation holds the buttons, or none. */
+/** Which operation holds the trigger, or none. */
 type BusyState = 'export-json' | 'export-markdown' | 'import-json' | 'import-csv' | null
 
 /**
  * Renders the import and export controls.
  *
  * @param props Reload callback.
- * @returns The controls element.
+ * @returns The menu element.
  */
 export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
   const [busy, setBusy] = useState<BusyState>(null)
   const [notice, setNotice] = useState<Notice>(null)
 
   /**
-   * Runs one dialog operation, keeping the buttons disabled and the notice honest.
+   * Runs one dialog operation, keeping the menu honest about what happened.
    *
    * Takes `() => Promise<void>` rather than returning a value: a generic that inferred across
    * the call site lost the discriminated union on the way through, and `result.written` became
@@ -65,14 +73,11 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
       void run(`export-${format}`, async () => {
         const result = await exportDiary({ format })
 
-        // Closing the dialog is a choice, not an error. Saying "exportado" then would be a
-        // lie the user has to disprove by opening the folder.
         setNotice(
           result.written
             ? { tone: 'info', message: `Se exportaron ${result.taskCount} tareas.` }
             : null
         )
-
       }),
     [run]
   )
@@ -83,71 +88,80 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
         const result = await importDiary({ format })
 
         if (result.imported) {
-          setNotice({
-            tone: 'info',
-            message: `Se importaron ${result.taskCount} tareas.`
-          })
+          setNotice({ tone: 'info', message: `Se importaron ${result.taskCount} tareas.` })
           onImported()
         }
-
       }),
     [run, onImported]
   )
 
   return (
-    <div className="flex items-center gap-1">
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={busy !== null}
-        onClick={() => doExport('json')}
-        aria-label="Exportar a JSON"
-      >
-        Exportar JSON
-      </Button>
+    <div className="flex min-w-0 items-center gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy !== null}
+            data-testid="data-menu-trigger"
+            aria-label="Importar y exportar"
+          >
+            Datos ▾
+          </Button>
+        </DropdownMenuTrigger>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={busy !== null}
-        onClick={() => doExport('markdown')}
-        aria-label="Exportar a Markdown"
-      >
-        Markdown
-      </Button>
+        <DropdownMenuContent>
+          <DropdownMenuLabel>Exportar</DropdownMenuLabel>
+          <DropdownMenuItem
+            data-testid="data-export-json"
+            disabled={busy !== null}
+            onSelect={() => doExport('json')}
+          >
+            Como JSON
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="data-export-markdown"
+            disabled={busy !== null}
+            onSelect={() => doExport('markdown')}
+          >
+            Como Markdown
+          </DropdownMenuItem>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={busy !== null}
-        onClick={() => doImport('json')}
-        aria-label="Importar desde JSON"
-      >
-        Importar JSON
-      </Button>
+          <DropdownMenuSeparator />
 
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={busy !== null}
-        onClick={() => doImport('csv')}
-        aria-label="Importar desde CSV"
-      >
-        Importar CSV
-      </Button>
+          <DropdownMenuLabel>Importar</DropdownMenuLabel>
+          <DropdownMenuItem
+            data-testid="data-import-json"
+            disabled={busy !== null}
+            onSelect={() => doImport('json')}
+          >
+            Desde JSON
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="data-import-csv"
+            disabled={busy !== null}
+            onSelect={() => doImport('csv')}
+          >
+            Desde CSV
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {notice !== null && (
-        <p
+        <span
           role={notice.tone === 'error' ? 'alert' : 'status'}
           data-testid="data-notice"
           className={[
-            'max-w-96 truncate px-2 py-1 text-xs',
+            // The notice must never be what pushes the bar over. It truncates and shrinks out
+            // of the way instead: a message that widens the layout is a message that causes
+            // the overflow it is reporting on.
+            'min-w-0 truncate text-xs',
             notice.tone === 'error' ? 'text-destructive' : 'text-muted-foreground'
           ].join(' ')}
           title={notice.message}
         >
           {notice.message}
-        </p>
+        </span>
       )}
     </div>
   )

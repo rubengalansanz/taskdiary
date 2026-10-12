@@ -349,6 +349,92 @@ try {
   check('the statistics screen shows a streak', stats !== null && /\d/.test(stats.streak ?? ''), JSON.stringify(stats))
   check('and a bar for each day of the week', stats?.bars === 7, `bars=${stats?.bars}`)
 
+  // --- The title bar fits, and the window never scrolls sideways ---------------------
+  // Regression guard for the layout bug that put a horizontal scrollbar under the whole app:
+  // fifteen fixed-width buttons in one non-wrapping row needed 1241px in a 1084px window.
+  // Asserted on geometry rather than on a class name, so a future button that is 1px too wide
+  // fails here instead of in a screenshot.
+  const bar = await run(
+    `(() => {
+       const header = document.querySelector('[data-testid="title-bar"]')
+       const doc = document.documentElement
+       if (!header) return null
+       const kids = [...header.children].map(c => {
+         const r = c.getBoundingClientRect()
+         return { top: Math.round(r.top), h: Math.round(r.height), w: Math.round(r.width) }
+       })
+       // Count rows by vertical *centre*, not by top edge. The bar is items-center, so a
+       // shorter group shares the line while sitting a couple of pixels lower: the actions
+       // cluster is 32px tall against the switcher's 36 and its top is 14, not 12. Comparing
+       // tops calls that a wrap; comparing centres correctly calls it one row.
+       const centres = new Set(kids.map(k => Math.round(k.top + k.h / 2)))
+       const rows = centres.size
+       return {
+         needs: header.scrollWidth,
+         has: header.clientWidth,
+         overflow: header.scrollWidth - header.clientWidth,
+         windowScrolls: doc.scrollWidth > doc.clientWidth,
+         headerH: Math.round(header.getBoundingClientRect().height),
+         rows,
+         kids
+       }
+     })()`
+  )
+  check('the title bar fits its window', bar !== null && bar.overflow <= 0, JSON.stringify(bar))
+  check(
+    'and the window never scrolls sideways',
+    bar?.windowScrolls === false,
+    `scrollWidth > clientWidth`
+  )
+  check('on a single row at the default width', bar?.rows === 1, `rows=${bar?.rows}`)
+
+  const narrow = await run(
+    `(() => {
+       const header = document.querySelector('[data-testid="title-bar"]')
+       const previous = header.style.width
+       header.style.width = '560px'
+       const out = {
+         rows: new Set([...header.children].map(c => Math.round(c.getBoundingClientRect().top))).size,
+         clipped: header.scrollWidth - header.clientWidth,
+         allVisible: [...header.children].every(c => c.getBoundingClientRect().width > 0)
+       }
+       header.style.width = previous
+       return out
+     })()`
+  )
+  check(
+    'narrower than the default, it wraps between groups instead of clipping',
+    narrow?.rows > 1 && narrow?.clipped <= 0 && narrow?.allVisible === true,
+    JSON.stringify(narrow)
+  )
+
+  const dataMenu = await run(
+    `(async () => {
+       const trigger = document.querySelector('[data-testid="data-menu-trigger"]')
+       if (!trigger) return { trigger: false }
+       const label = trigger.textContent.trim()
+       // The four data actions used to be flat buttons taking 558px of the bar.
+       const flatBefore = [...document.querySelectorAll('header button')].filter((b) =>
+         /Exportar|Markdown|Importar/.test(b.textContent)
+       ).length
+       // Radix opens on pointerdown, not click, and needs a mouse pointerType. The menu
+       // renders through a portal on the next tick, so reading synchronously sees nothing.
+       trigger.dispatchEvent(
+         new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })
+       )
+       await new Promise((r) => setTimeout(r, 250))
+       const items = document.querySelectorAll('[data-slot="dropdown-menu-item"]').length
+       document.body.click()
+       return { trigger: true, label, items, flatBefore }
+     })()`
+  )
+  check(
+    'import and export live behind one menu, not four buttons',
+    dataMenu?.trigger === true && dataMenu?.items === 4 && dataMenu?.flatBefore === 0,
+    JSON.stringify(dataMenu)
+  )
+
+
   // --- The aggregate sees what the day view sees ------------------------------------
   const expanded = await run(
     `window.taskDiary.tasks.summaryRange({ fromDate: ${J(dates.monday)}, toDate: ${J(dates.nextMonday)} })

@@ -103,6 +103,13 @@
   }
 
   body {
+    /* The app manages its own overflow: the views scroll, the shell does not. Without this,
+       any child that outgrows its container — a wide grid, a long word, a title bar with too
+       many controls — widens the document and hands the whole window a horizontal scrollbar
+       to fix a problem it has no business solving. That scrollbar appeared at the default
+       1100px width before the title bar was grouped, and it is the kind of regression that
+       comes back silently, so the guarantee belongs here rather than in each view. */
+    overflow: hidden;
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family:
