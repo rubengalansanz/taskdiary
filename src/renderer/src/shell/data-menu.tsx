@@ -24,8 +24,14 @@ import {
 
 /** Props of {@link DataMenu}. */
 export interface DataMenuProps {
-  /** Called after a successful import, so the open view reloads what just changed. */
-  onImported: () => void
+  /**
+   * Called after a successful import, so the open view reloads what just changed.
+   *
+   * Optional, and that matters more than it looks: export has nothing to do with reloading.
+   * A view that cannot reload must still be able to save a copy of its data, so this being
+   * absent hides nothing — the import simply reports and does not refresh.
+   */
+  onImported?: () => void
 }
 
 /** One line of feedback, or none. */
@@ -90,7 +96,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
 
         if (result.imported) {
           setNotice({ tone: 'info', message: `Se importaron ${result.taskCount} tareas.` })
-          onImported()
+          onImported?.()
         }
       }),
     [run, onImported]
@@ -103,6 +109,9 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <Button
             variant="ghost"
             size="sm"
+            // The only control `busy` guards. Radix unmounts the items the moment one is
+            // chosen, so a `disabled` on them could never render — it would read as though the
+            // menu could reopen mid-operation.
             disabled={busy}
             data-testid="data-menu-trigger"
             aria-label="Importar y exportar"
@@ -115,14 +124,12 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <DropdownMenuLabel>Exportar</DropdownMenuLabel>
           <DropdownMenuItem
             data-testid="data-export-json"
-            disabled={busy}
             onSelect={() => doExport('json')}
           >
             Como JSON
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="data-export-markdown"
-            disabled={busy}
             onSelect={() => doExport('markdown')}
           >
             Como Markdown
@@ -133,14 +140,12 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           <DropdownMenuLabel>Importar</DropdownMenuLabel>
           <DropdownMenuItem
             data-testid="data-import-json"
-            disabled={busy}
             onSelect={() => doImport('json')}
           >
             Desde JSON
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="data-import-csv"
-            disabled={busy}
             onSelect={() => doImport('csv')}
           >
             Desde CSV

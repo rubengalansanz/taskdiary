@@ -150,7 +150,11 @@ export function TitleBar({
       </div>
 
       <div className="ml-auto flex min-w-0 shrink items-center gap-2">
-        {onImported !== undefined && <DataMenu onImported={onImported} />}
+        {/* Always rendered. Export has nothing to do with `onImported`, so gating the whole
+            menu on a reload callback would mean a view that cannot reload also silently loses
+            the ability to save a copy of its data. Every view can reload today, which is
+            exactly why that gate looked free. */}
+        <DataMenu onImported={onImported} />
 
         <Button size="sm" onClick={() => openDialog('create')}>
           Nueva tarea
