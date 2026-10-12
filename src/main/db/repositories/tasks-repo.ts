@@ -58,6 +58,8 @@ interface TaskRow {
   updated_at: string
   started_at: string | null
   completed_at: string | null
+  /** Identity of the series this row belongs to, or `null` for a one-off. Added by `0004`. */
+  series_id: string | null
 }
 
 /** Non-recurrence fields accepted when creating a task, as they arrive from the IPC layer. */
@@ -118,7 +120,7 @@ const MAX_SEARCH_LIMIT = 500
 const TASK_COLUMNS = `
   id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
   rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-  created_at, updated_at, started_at, completed_at
+  created_at, updated_at, started_at, completed_at, series_id
 `.trim()
 
 /** Shape of an already-grouped `GROUP BY task_date` row. `SUM` yields numbers, never null. */
@@ -237,8 +239,7 @@ export class TasksRepository {
           `SELECT ${TASK_COLUMNS}
              FROM tasks
             WHERE rrule_freq <> 'none'
-              AND rrule_from IS NOT NULL
-              AND task_date = rrule_from
+              AND series_id = id
               AND rrule_from <= ?
               AND (rrule_until IS NULL OR rrule_until >= ?)
             ORDER BY rrule_from ASC`
@@ -272,8 +273,8 @@ export class TasksRepository {
    */
   private insertOccurrence(origin: Task, taskDate: string): void {
     const existing = this.database
-      .prepare('SELECT 1 AS present FROM tasks WHERE rrule_from = ? AND task_date = ?')
-      .get(origin.rruleFrom, taskDate)
+      .prepare('SELECT 1 AS present FROM tasks WHERE series_id = ? AND task_date = ?')
+      .get(origin.id, taskDate)
 
     if (existing !== undefined) {
       return
@@ -296,11 +297,11 @@ export class TasksRepository {
         `INSERT INTO tasks (
            id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
            rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-           created_at, updated_at, started_at, completed_at, search_text
+           created_at, updated_at, started_at, completed_at, search_text, series_id
          ) VALUES (
            @id, @title, @notes, @taskDate, 'pending', @startMin, @endMin, @estimateMin, @color,
            @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
-           @createdAt, @updatedAt, NULL, NULL, @searchText
+           @createdAt, @createdAt, NULL, NULL, @searchText, @seriesId
          )`
       )
       .run({
@@ -317,8 +318,9 @@ export class TasksRepository {
         rruleDays: origin.rruleDays === null ? null : origin.rruleDays.join(','),
         rruleUntil: origin.rruleUntil,
         rruleFrom: origin.rruleFrom,
+        // The occurrence belongs to the series' identity, which is the origin row's id.
+        seriesId: origin.id,
         createdAt: now,
-        updatedAt: now,
         searchText: buildSearchText(origin.title, origin.notes)
       })
 
@@ -520,7 +522,14 @@ export class TasksRepository {
   create(input: NewTaskInput): Task {
     const id = randomUUID()
     const now = toAuditTimestamp()
-    const recurrence = normalizeRecurrence(input)
+    // A recurring task's row is its first occurrence, so a series created without an explicit
+    // origin starts on the day it was created. Without this the origin stayed `null` and the
+    // `CHECK (rrule_freq = 'none' OR rrule_from IS NOT NULL)` constraint rejected the insert
+    // with a raw SqliteError — a database message, on a perfectly reasonable request.
+    const recurrence = normalizeRecurrence({
+      ...input,
+      rruleFrom: input.rruleFreq === 'none' ? null : (input.rruleFrom ?? input.taskDate)
+    })
 
     assertOriginIsFirstOccurrence(input.taskDate, recurrence)
 
@@ -529,15 +538,19 @@ export class TasksRepository {
         `INSERT INTO tasks (
            id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
            rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-           created_at, updated_at, started_at, completed_at, search_text
+           created_at, updated_at, started_at, completed_at, search_text, series_id
          ) VALUES (
            @id, @title, @notes, @taskDate, 'pending', @startMin, @endMin, @estimateMin, @color,
            @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
-           @createdAt, @updatedAt, NULL, NULL, @searchText
+           @createdAt, @createdAt, NULL, NULL, @searchText, @seriesId
          )`
       )
       .run({
         id,
+        // A series is its own first occurrence, so it claims its own id. Two series created
+        // on the same day are then two ids rather than two rows fighting over one origin
+        // date — which `0004` exists to allow and `0001`'s index forbade.
+        seriesId: recurrence.rruleFreq === 'none' ? null : id,
         title: input.title,
         notes: input.notes,
         taskDate: input.taskDate,
@@ -593,21 +606,39 @@ export class TasksRepository {
       status: input.status ?? current.status
     }
 
-    if (content.rruleFreq !== undefined || content.rruleDays !== undefined) {
+    if (
+      content.rruleFreq !== undefined ||
+      content.rruleDays !== undefined ||
+      content.rruleUntil !== undefined
+    ) {
       // Merged with the stored rule before validating: sending only `rruleDays` must
       // not reach the validator as a partial object, or the fields that were omitted
       // read as `undefined` and fail a check that has nothing to do with the change.
-      Object.assign(
-        candidate,
-        normalizeRecurrence({
-          rruleFreq: content.rruleFreq ?? current.rruleFreq,
-          rruleInterval: content.rruleInterval ?? current.rruleInterval,
-          rruleDays: content.rruleDays ?? current.rruleDays,
-          rruleUntil: content.rruleUntil ?? current.rruleUntil,
-          rruleFrom: content.rruleFrom ?? current.rruleFrom
-        })
-      )
+      //
+      // The merge tests `!== undefined`, not truthiness. `??` read an explicit `null` as
+      // "absent", which made `rruleDays: null` and `rruleUntil: null` silently keep the old
+      // value: a series could gain a weekday list and an end date but never lose either.
+      const merged = normalizeRecurrence({
+        rruleFreq: content.rruleFreq ?? current.rruleFreq,
+        rruleInterval: content.rruleInterval ?? current.rruleInterval,
+        rruleDays: content.rruleDays !== undefined ? content.rruleDays : current.rruleDays,
+        rruleUntil: content.rruleUntil !== undefined ? content.rruleUntil : current.rruleUntil,
+        // A recurring task's row is its first occurrence, so clearing the origin on a
+        // recurring task restores it to the task's own day rather than leaving the series
+        // without one — the column's CHECK constraint rejects that outright.
+        rruleFrom:
+          current.rruleFreq !== 'none' && content.rruleFrom === null
+            ? candidate.taskDate
+            : (content.rruleFrom ?? current.rruleFrom)
+      })
+
+      Object.assign(candidate, merged)
     }
+
+    // Checked against the merged state, not the payload. An update that sends only
+    // `rruleDays` carries no `taskDate` at all, and comparing `undefined` against the origin
+    // would reject every edit to a weekly series.
+    assertOriginIsFirstOccurrence(candidate.taskDate, candidate)
 
     // The merged range is validated here, not at the IPC boundary, because only this
     // function can see both ends: an update carrying just `endMin` has to be checked
@@ -835,7 +866,12 @@ export class TasksRepository {
       // The column name comes from a compile-time constant and the value from a named
       // parameter. Neither is ever interpolated as text into the statement.
       assignments.push(`${COLUMN_BY_FIELD[key]} = @${key}`)
-      parameters[key] = value
+      // `rruleDays` is a `number[]` in the domain and CSV in the column, so it is serialised
+      // here exactly as `toRecurrenceColumns` serialises it on the way in. Binding it raw
+      // throws `TypeError: SQLite3 can only bind numbers, strings, bigints, buffers, and
+      // null` — which is how editing the weekdays of a weekly series used to crash the main
+      // process. Create and insertOccurrence both got this right; only the writer forgot.
+      parameters[key] = key === 'rruleDays' && Array.isArray(value) ? value.join(',') : value
     }
 
     this.database

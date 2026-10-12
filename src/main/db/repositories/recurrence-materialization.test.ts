@@ -54,11 +54,17 @@ function titlesOn(taskDate: string): string[] {
     .sort()
 }
 
-/** How many rows share one series origin on one day. */
-function occurrenceCount(rruleFrom: string, taskDate: string): number {
+/**
+ * How many rows one series holds on one day.
+ *
+ * Keyed by `series_id`, the series' identity. It was once keyed by `rrule_from`, and that is
+ * the bug `0004` fixes: an origin date is not a series, so two series born the same day
+ * counted as one.
+ */
+function occurrenceCount(seriesId: string, taskDate: string): number {
   const row = database
-    .prepare('SELECT COUNT(*) AS total FROM tasks WHERE rrule_from = ? AND task_date = ?')
-    .get(rruleFrom, taskDate) as { total: number }
+    .prepare('SELECT COUNT(*) AS total FROM tasks WHERE series_id = ? AND task_date = ?')
+    .get(seriesId, taskDate) as { total: number }
 
   return row.total
 }
@@ -77,7 +83,7 @@ describe('acceptance criterion 1 — a weekly series appears exactly once per da
   it('materialises once, however many times the day is read', () => {
     // Reading a day is what materialises it, so re-reading is the normal path rather than an
     // edge case. Ten reads, one row.
-    repository.create(
+    const series = repository.create(
       newTask({ rruleFreq: 'weekly', rruleDays: [1], rruleFrom: '2026-10-05' })
     )
 
@@ -85,12 +91,12 @@ describe('acceptance criterion 1 — a weekly series appears exactly once per da
       repository.listByDate('2026-10-05')
     }
 
-    expect(occurrenceCount('2026-10-05', '2026-10-05')).toBe(1)
+    expect(occurrenceCount(series.id, '2026-10-05')).toBe(1)
     expect(titlesOn('2026-10-05')).toEqual(['Revisión semanal'])
   })
 
   it('materialises each week of the series separately', () => {
-    repository.create(
+    const series = repository.create(
       newTask({ rruleFreq: 'weekly', rruleDays: [1], rruleFrom: '2026-10-05' })
     )
 
@@ -98,8 +104,8 @@ describe('acceptance criterion 1 — a weekly series appears exactly once per da
     repository.listByDate('2026-10-12')
     repository.listByDate('2026-10-19')
 
-    expect(occurrenceCount('2026-10-05', '2026-10-12')).toBe(1)
-    expect(occurrenceCount('2026-10-05', '2026-10-19')).toBe(1)
+    expect(occurrenceCount(series.id, '2026-10-12')).toBe(1)
+    expect(occurrenceCount(series.id, '2026-10-19')).toBe(1)
   })
 
   it('does not materialise a day the series does not reach', () => {
@@ -188,7 +194,7 @@ describe('acceptance criterion 2 — a series whose until has passed', () => {
 
 describe('acceptance criterion 5 — the unique index and the transaction', () => {
   it('refuses a second occurrence at the storage layer, not just in the materialiser', () => {
-    repository.create(
+    const series = repository.create(
       newTask({ rruleFreq: 'weekly', rruleDays: [1], rruleFrom: '2026-10-05' })
     )
     repository.listByDate('2026-10-05')
@@ -196,21 +202,24 @@ describe('acceptance criterion 5 — the unique index and the transaction', () =
     // The index is the last line of defence and has to hold on its own: the materialiser's own
     // existence check is the first. So this goes straight to SQL, bypassing both, and the
     // constraint is what rejects it.
-    expect(() => database
-      .prepare(
-        `INSERT INTO tasks (
-           id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
-           rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-           created_at, updated_at, started_at, completed_at, search_text
-         ) VALUES (
-           'rogue', 'Revisión semanal', NULL, '2026-10-05', 'pending', 540, 600, 60, NULL,
-           'weekly', 1, '1', NULL, '2026-10-05',
-           '2026-10-05T08:00:00.000Z', '2026-10-05T08:00:00.000Z', NULL, NULL, 'revision semanal'
-         )`
-      )
-      .run()).toThrow(/UNIQUE/)
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO tasks (
+             id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
+             rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
+             created_at, updated_at, started_at, completed_at, search_text, series_id
+           ) VALUES (
+             'rogue', 'Revisión semanal', NULL, '2026-10-05', 'pending', 540, 600, 60, NULL,
+             'weekly', 1, '1', NULL, '2026-10-05',
+             '2026-10-05T08:00:00.000Z', '2026-10-05T08:00:00.000Z', NULL, NULL,
+             'revision semanal', @seriesId
+           )`
+        )
+        .run({ seriesId: series.id })
+    ).toThrow(/UNIQUE/)
 
-    expect(occurrenceCount('2026-10-05', '2026-10-05')).toBe(1)
+    expect(occurrenceCount(series.id, '2026-10-05')).toBe(1)
   })
 
   it('materialises a whole range atomically', () => {
@@ -342,5 +351,130 @@ describe('a one-off task is never materialised', () => {
     }
 
     expect(repository.listByDate('2026-10-05')).toHaveLength(1)
+  })
+})
+
+describe('editing the series itself', () => {
+  it('persists a valid change to the weekday list', () => {
+    // The suite could not catch this class of bug by construction: the only test that touched
+    // `rruleDays` on update sent an *invalid* list, which `normalizeRecurrence` rejects long
+    // before the writer runs. A test that only proves the validator fires says nothing about
+    // the writer, and the writer was the broken half.
+    const created = repository.create(
+      newTask({ taskDate: '2026-10-05', rruleFreq: 'weekly', rruleDays: [1, 3] })
+    )
+
+    const updated = repository.update(created.id, { rruleDays: [1, 3, 5] })
+
+    expect(updated.rruleDays).toEqual([1, 3, 5])
+    expect(repository.findById(created.id).rruleDays).toEqual([1, 3, 5])
+  })
+
+  it('stores the list as CSV, the shape the column holds', () => {
+    const created = repository.create(
+      newTask({ taskDate: '2026-10-05', rruleFreq: 'weekly', rruleDays: [1, 3] })
+    )
+    repository.update(created.id, { rruleDays: [2, 4, 6] })
+
+    const row = database
+      .prepare('SELECT rrule_days AS days FROM tasks WHERE id = ?')
+      .get(created.id) as { days: string }
+
+    expect(row.days).toBe('2,4,6')
+  })
+
+  it('clears the list without leaving a stale string behind', () => {
+    const created = repository.create(
+      newTask({ taskDate: '2026-10-05', rruleFreq: 'weekly', rruleDays: [1, 3] })
+    )
+
+    const updated = repository.update(created.id, { rruleDays: null })
+
+    expect(updated.rruleDays).toBeNull()
+  })
+
+  it('still refuses an invalid list before touching the row', () => {
+    const created = repository.create(
+      newTask({ taskDate: '2026-10-05', rruleFreq: 'weekly', rruleDays: [1, 3] })
+    )
+
+    expect(() => repository.update(created.id, { rruleDays: [0, 9] })).toThrow()
+    expect(repository.findById(created.id).rruleDays).toEqual([1, 3])
+  })
+})
+
+describe('two series born on the same day', () => {
+  // This is the case `0004` exists for. `0001` made `idx_tasks_occurrence` unique on
+  // `(rrule_from, task_date)`, and `rrule_from` is a date: two recurring tasks created on the
+  // same morning shared an origin and the second one died on
+  // `UNIQUE constraint failed: tasks.rrule_from, tasks.task_date`. Creating "Standup" and
+  // "Gym" as daily series was impossible — the most ordinary use the feature has.
+  it('can both exist', () => {
+    repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Standup', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+    repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Gym', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+
+    const onOrigin = repository
+      .listByDate('2026-01-05')
+      .map((task) => task.title)
+      .sort()
+
+    expect(onOrigin).toEqual(['Gym', 'Standup'])
+  })
+
+  it('materialises both, each day, without either swallowing the other', () => {
+    repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Standup', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+    repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Gym', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+
+    const later = repository
+      .listByDate('2026-01-06')
+      .map((task) => task.title)
+      .sort()
+
+    expect(later).toEqual(['Gym', 'Standup'])
+  })
+
+  it('still refuses a duplicate occurrence of one series on one day', () => {
+    const series = repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Standup', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+
+    repository.listByDate('2026-01-06')
+    repository.listByDate('2026-01-06')
+
+    const row = database
+      .prepare('SELECT COUNT(*) AS total FROM tasks WHERE series_id = ? AND task_date = ?')
+      .get(series.id, '2026-01-06') as { total: number }
+
+    expect(row.total).toBe(1)
+  })
+
+  it('gives each series its own identity', () => {
+    const standup = repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Standup', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+    const gym = repository.create(
+      newTask({ taskDate: '2026-01-05', title: 'Gym', rruleFreq: 'daily', rruleFrom: '2026-01-05' })
+    )
+
+    expect(standup.id).not.toBe(gym.id)
+
+    // Reading the day is what materialises it, so the occurrence rows do not exist until then.
+    repository.listByDate('2026-01-06')
+
+    const ids = database
+      .prepare(
+        `SELECT series_id FROM tasks WHERE task_date = '2026-01-06' AND title IN ('Standup','Gym')`
+      )
+      .all() as { series_id: string }[]
+
+    expect(ids.map((row) => row.series_id).sort()).toEqual([gym.id, standup.id].sort())
   })
 })

@@ -1,11 +1,9 @@
+import { daysInMonth, isValidLocalDate, parseLocalDate } from './datetime'
 import {
   addDays,
   compareLocalDates,
-  daysInMonth,
   daysBetween,
-  isoWeekday,
-  isValidLocalDate,
-  parseLocalDate
+  isoWeekday
 } from './date-arith'
 import type { RruleFreq } from './task'
 
@@ -175,8 +173,8 @@ function isWeekOfSeries(rule: RecurrenceRule, date: string): boolean {
  * @returns True when the day is due.
  */
 function occursMonthly(rule: RecurrenceRule, date: string): boolean {
-  const origin = parseLocalDate(rule.rruleFrom as string) as { year: number; month: number; day: number }
-  const target = parseLocalDate(date) as { year: number; month: number; day: number }
+  const origin = parseLocalDate(rule.rruleFrom as string)
+  const target = parseLocalDate(date)
 
   const monthsApart =
     (target.year - origin.year) * 12 + (target.month - origin.month)
