@@ -3,6 +3,7 @@ import { DayRoute } from '../features/tasks/day-view'
 import { WeekRoute } from '../features/tasks/week-view'
 import { MonthRoute } from '../features/tasks/month-view'
 import { HeatmapRoute } from '../features/tasks/heatmap-view'
+import { StatsRoute } from '../features/tasks/stats-view'
 import { today } from '../shared/lib/date'
 
 /**
@@ -37,6 +38,7 @@ export function AppRoutes(): React.JSX.Element {
       {/* The heatmap is anchored to today and has no date in its path: §10.2 defines it as the
           last 26 weeks, so a `:date` segment here would promise a range it cannot honour. */}
       <Route path="/heatmap" element={<HeatmapRoute />} />
+      <Route path="/stats/:date" element={<StatsRoute />} />
       {/* A hand-typed or stale URL repairs to the day view rather than rendering a blank
           shell. Navigation is not a place where a typo deserves a dead end. */}
       <Route path="*" element={<Navigate to="/" replace />} />

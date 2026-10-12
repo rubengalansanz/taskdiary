@@ -22,7 +22,8 @@
     "smoke:ui": "electron-vite build && node scripts/fase2-smoke.mjs",
     "smoke:tags": "electron-vite build && node scripts/fase3-smoke.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test",
-    "smoke:views": "electron-vite build && node scripts/fase4-smoke.mjs"
+    "smoke:views": "electron-vite build && node scripts/fase4-smoke.mjs",
+    "smoke:io": "electron-vite build && node scripts/fase5-smoke.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "3.0.2",

@@ -6,7 +6,9 @@ import { AppError, APP_ERROR_MESSAGES } from '../../core/errors'
 import { toAuditTimestamp } from '../../core/datetime'
 import { occursOn } from '../../core/recurrence'
 import { addDays } from '../../core/date-arith'
+import type { StatsTotals } from '../../core/stats'
 import type { TransferTask } from '../../core/transfer'
+import { daysBetween, startOfWeek } from '../../core/date-arith'
 import {
   diffTaskForUpdate,
   WRITABLE_TASK_FIELDS,
@@ -840,6 +842,81 @@ export class TasksRepository {
       .get(taskDate) as { total: number }
 
     return row.total
+  }
+
+  /**
+   * The numbers the Statistics view shows.
+   *
+   * Two statements, both aggregating. The first answers "which days hold completed work",
+   * the second answers the totals, and neither returns a task. That split is what keeps a
+   * streak — which is a question about *consecutive* days — cheap: SQL would have to walk the
+   * whole history for every row comparison, while the set it returns is at most one entry per
+   * day with work in it.
+   *
+   * Real minutes come from the two timestamps the stopwatch already writes (ADR-023). There
+   * is no `completed_min` column, and adding one would store a second copy of a number that
+   * could then disagree with the row it came from.
+   *
+   * @param today The day to anchor "today's" numbers and the current streak on.
+   * @returns Completed days, totals and the week average.
+   */
+  stats(today: string): StatsTotals {
+    const weekStart = addDays(startOfWeek(today), 0)
+
+    // Bounded by the week: materialises a week of recurring series, nothing older.
+    this.materializeRange(weekStart, today)
+
+    const completed = this.database
+      .prepare(
+        `SELECT DISTINCT task_date AS date
+           FROM tasks
+          WHERE status = 'done'`
+      )
+      .all() as { date: string }[]
+
+    const totals = this.database
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS done,
+           COALESCE(SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END), 0) AS in_progress,
+           COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN COALESCE(estimate_min, 0) ELSE 0 END), 0) AS estimate_min,
+           COALESCE(SUM(CASE WHEN status = 'done' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+                            THEN strftime('%s', completed_at) - strftime('%s', started_at)
+                            ELSE 0 END), 0) AS real_seconds,
+           COALESCE(SUM(CASE WHEN status = 'done' AND (started_at IS NULL OR completed_at IS NULL)
+                            THEN 1 ELSE 0 END), 0) AS unmeasured_done
+         FROM tasks`
+      )
+      .get() as {
+      done: number
+      in_progress: number
+      estimate_min: number
+      real_seconds: number
+      unmeasured_done: number
+    }
+
+    const week = this.database
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT CASE WHEN status = 'done' THEN task_date END) AS days_with_work,
+           COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS done
+         FROM tasks
+        WHERE task_date BETWEEN ? AND ?`
+      )
+      .get(weekStart, today) as { days_with_work: number; done: number }
+
+    return {
+      today,
+      totalDone: totals.done,
+      totalInProgress: totals.in_progress,
+      estimateMin: totals.estimate_min,
+      realMin: Math.round(totals.real_seconds / 60),
+      unmeasuredDone: totals.unmeasured_done,
+      weekFrom: weekStart,
+      weekDone: week.done,
+      weekDaysElapsed: daysBetween(weekStart, today) + 1,
+      completedDays: completed.map((row) => row.date)
+    }
   }
 
   /**

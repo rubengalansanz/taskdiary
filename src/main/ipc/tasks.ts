@@ -1,5 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
-import type { z } from 'zod'
+import { z } from 'zod'
 import { AppError } from '../core/errors'
 import { guard, parseOrThrow, type FailureDto } from './guard'
 import {
@@ -15,8 +15,11 @@ import { type TasksRepository } from '../db/repositories/tasks-repo'
 import type { NewTaskInput, TaskSearchFilter, UpdateTaskInput } from '../db/repositories/tasks-repo'
 import { type TagsRepository } from '../db/repositories/tags-repo'
 import { isValidTagName } from '../../shared/tags'
+import { complianceRatio, currentStreak, longestStreak } from '../core/stats'
+import { addDays } from '../core/date-arith'
 import {
   createTaskRequestSchema,
+  localDateSchema,
   deleteTaskRequestSchema,
   listTaskRangeRequestSchema,
   summarizeRangeRequestSchema,
@@ -32,6 +35,8 @@ import {
   type TaskListResultDto,
   type SearchTasksResultDto,
   type TagListResultDto,
+  type DaySummaryDto,
+  type StatsSummaryResultDto,
   type SummarizeRangeResultDto,
   type TaskResultDto,
   type UpdateTaskRequest
@@ -66,6 +71,8 @@ type SearchTasksOk = Extract<SearchTasksResultDto, { ok: true }>
 type TagListOk = Extract<TagListResultDto, { ok: true }>
 /** Success half of a per-day aggregation. */
 type SummarizeRangeOk = Extract<SummarizeRangeResultDto, { ok: true }>
+/** Success half of a statistics summary. */
+type StatsSummaryOk = Extract<StatsSummaryResultDto, { ok: true }>
 
 /**
  * Projects the domain model onto the wire shape.
@@ -233,6 +240,70 @@ export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsR
           tasks: repository
             .listByRange(assertLocalDate(request.fromDate), assertLocalDate(request.toDate))
             .map(toTaskDto)
+        }
+      })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.statsSummary,
+    (_event: IpcMainInvokeEvent, payload: unknown): StatsSummaryResultDto | FailureDto =>
+      guard((): StatsSummaryOk | FailureDto => {
+        const taskDate = assertLocalDate(
+          parseOrThrow(z.object({ taskDate: localDateSchema }), payload).taskDate
+        )
+
+        const totals = repository.stats(taskDate)
+        const completed = new Set(totals.completedDays)
+        const weekFrom = totals.weekFrom
+        const byDay = new Map(repository.summarizeRange(weekFrom, taskDate).map((d) => [d.date, d]))
+
+        // Seven entries, always. `summarizeRange` omits days with no work, which is right for
+        // the aggregate and wrong for a chart: a weekly bar that only draws the days with
+        // data changes width as the week fills, so the reader cannot tell a quiet Monday from
+        // a missing one. Empty days are explicit zeros here.
+        const week: DaySummaryDto[] = []
+
+        // The whole week, not the elapsed part: a chart that grows a column a day changes
+        // width under the reader, so yesterday's four bars are never where today's are. The
+        // future days are explicit zeros.
+        const weekEnd = addDays(weekFrom, 6)
+
+        for (let day = weekFrom; day <= weekEnd; day = addDays(day, 1)) {
+          week.push(
+            byDay.get(day) ?? {
+              date: day,
+              total: 0,
+              done: 0,
+              inProgress: 0,
+              pending: 0,
+              cancelled: 0,
+              estimateMin: 0,
+              realMin: 0,
+              unmeasuredDone: 0
+            }
+          )
+        }
+        const estimateMin = week.reduce((sum, day) => sum + day.estimateMin, 0)
+        const realMin = week.reduce((sum, day) => sum + day.realMin, 0)
+
+        return {
+          ok: true,
+          stats: {
+            today: taskDate,
+            totalDone: totals.totalDone,
+            totalInProgress: totals.totalInProgress,
+            estimateMin: totals.estimateMin,
+            realMin: totals.realMin,
+            unmeasuredDone: totals.unmeasuredDone,
+            // Counted backwards from today, so an unfinished today does not read as a broken
+            // streak. See `core/stats.ts` for why that decision is the whole design.
+            currentStreak: currentStreak(completed, taskDate),
+            longestStreak: longestStreak(completed),
+            weekDone: totals.weekDone,
+            weekDaysElapsed: totals.weekDaysElapsed,
+            complianceRatio: complianceRatio(estimateMin, realMin),
+            week
+          }
         }
       })
   )

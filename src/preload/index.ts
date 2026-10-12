@@ -91,6 +91,10 @@ const menu: TaskDiaryApi['menu'] = {
   }
 }
 
+const stats: TaskDiaryApi['stats'] = {
+  summary: (request) => invoke(IPC_CHANNELS.statsSummary, request)
+}
+
 const data: TaskDiaryApi['data'] = {
   export: (request) => invoke(IPC_CHANNELS.dataExport, request),
   import: (request) => invoke(IPC_CHANNELS.dataImport, request)
@@ -103,6 +107,7 @@ const taskDiary: TaskDiaryApi = {
   },
   tasks,
   data,
+  stats,
   tags: tagApi,
   menu,
   theme

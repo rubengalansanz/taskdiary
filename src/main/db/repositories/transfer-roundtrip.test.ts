@@ -333,3 +333,94 @@ function withoutIdentity(task: TransferTask): Omit<TransferTask, 'startedAt' | '
 
   return rest
 }
+
+describe('stats', () => {
+  /** Completes a task on a day, going through the real state machine. */
+  function completeOn(taskDate: string, estimateMin = 60, title = 'Tarea'): string {
+    const created = repository.create(
+      newTask({ taskDate, title, estimateMin, tags: [], rruleFreq: 'none' })
+    )
+    repository.update(created.id, { status: 'done' })
+
+    return created.id
+  }
+
+  it('counts nothing in an empty diary rather than failing', () => {
+    const totals = repository.stats('2026-10-07')
+
+    expect(totals.totalDone).toBe(0)
+    expect(totals.completedDays).toEqual([])
+    expect(totals.realMin).toBe(0)
+  })
+
+  it('reports the days holding completed work', () => {
+    completeOn('2026-10-05')
+    completeOn('2026-10-06')
+    completeOn('2026-10-07')
+
+    const totals = repository.stats('2026-10-07')
+
+    expect(totals.totalDone).toBe(3)
+    expect(totals.completedDays.sort()).toEqual(['2026-10-05', '2026-10-06', '2026-10-07'])
+  })
+
+  it('does not count an unfinished task as a completed day', () => {
+    repository.create(newTask({ taskDate: '2026-10-07' }))
+
+    expect(repository.stats('2026-10-07').completedDays).toEqual([])
+  })
+
+  it('counts today in the week even when nothing is done', () => {
+    // 2026-10-07 is a Wednesday. Days elapsed is 3, not 0 — dividing by zero would report
+    // a week average of "no data" every Monday morning.
+    const totals = repository.stats('2026-10-07')
+
+    expect(totals.weekFrom).toBe('2026-10-05')
+    expect(totals.weekDaysElapsed).toBe(3)
+  })
+
+  it('excludes unmeasured completions from the real total', () => {
+    completeOn('2026-10-06', 45)
+
+    const totals = repository.stats('2026-10-07')
+
+    expect(totals.unmeasuredDone).toBe(1)
+    expect(totals.realMin).toBe(0)
+    expect(totals.estimateMin).toBe(45)
+  })
+
+  it('materialises the week so a recurring series shows up in today\'s numbers', () => {
+    repository.create(
+      newTask({
+        taskDate: '2026-10-05',
+        title: 'Standup',
+        rruleFreq: 'daily',
+        rruleFrom: '2026-10-05',
+        tags: []
+      })
+    )
+
+    // Reading the stats is what brings today's occurrence into existence.
+    const totals = repository.stats('2026-10-07')
+
+    expect(repository.listByDate('2026-10-07')).toHaveLength(1)
+    expect(totals.totalDone).toBe(0)
+  })
+
+  it('does not materialise days before the current week', () => {
+    repository.create(
+      newTask({
+        taskDate: '2026-10-05',
+        title: 'Standup',
+        rruleFreq: 'daily',
+        rruleFrom: '2026-10-05',
+        tags: []
+      })
+    )
+
+    repository.stats('2026-10-07')
+
+    // An open-ended series would otherwise materialise the entire history on every visit.
+    expect(repository.listByDate('2026-09-01')).toHaveLength(0)
+  })
+})

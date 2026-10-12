@@ -27,7 +27,9 @@ const NAV_STEP: Readonly<Record<ViewMode, ((date: string, delta: number) => stri
   day: (date, delta) => addDays(date, delta),
   week: (date, delta) => addDays(date, delta * 7),
   month: (date, delta) => addMonths(date, delta),
-  heatmap: null
+  heatmap: null,
+  // The statistics screen follows the day it is anchored on, like Week and Month.
+  stats: (date, delta) => addDays(date, delta)
 }
 
 /** Props of {@link TitleBar}. */
@@ -99,9 +101,9 @@ export function TitleBar({
         </>
       )}
 
-      {view !== 'day' && (
+      {view !== 'day' && view !== 'stats' && (
         <Button variant="ghost" size="sm" onClick={() => onNavigate(today())}>
-          {view === 'week' ? 'Semana actual' : view === 'month' ? 'Mes actual' : 'Ir al día'}
+          {view === 'week' ? 'Semana actual' : 'Mes actual'}
         </Button>
       )}
 

@@ -428,6 +428,8 @@ export const IPC_CHANNELS = {
   taskSetStatus: 'taskdiary:task:set-status',
   /** Phase 3: search the whole history by text, tags and status. */
   taskSearch: 'taskdiary:task:search',
+  /** Phase 5: the numbers the Statistics view shows. */
+  statsSummary: 'taskdiary:stats:summary',
   /** Phase 5: write the whole diary to a file the user picks. */
   dataExport: 'taskdiary:data:export',
   /** Phase 5: read tasks from a file the user picks. */
@@ -484,6 +486,37 @@ export interface TaskApi {
   search(request: SearchTasksRequest): Promise<SearchTasksResultDto>
 }
 
+/** Result of `stats:summary` — the whole Statistics view in one payload. */
+export const statsSummarySchema = z.object({
+  /** The day the numbers are anchored on. */
+  today: localDateSchema,
+  totalDone: z.number().int().min(0),
+  totalInProgress: z.number().int().min(0),
+  estimateMin: z.number().int().min(0),
+  realMin: z.number().int().min(0),
+  /** Completed tasks with no measurable duration, excluded from `realMin`. */
+  unmeasuredDone: z.number().int().min(0),
+  currentStreak: z.number().int().min(0),
+  longestStreak: z.number().int().min(0),
+  weekDone: z.number().int().min(0),
+  weekDaysElapsed: z.number().int().min(1),
+  /** Share of the estimated time actually spent. May exceed 1. */
+  complianceRatio: z.number().min(0),
+  /** The last seven days, for the weekly bar. Oldest first. */
+  week: z.array(daySummarySchema)
+})
+
+/** Result of `stats:summary`. */
+export const statsSummaryResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), stats: statsSummarySchema }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/** Statistics, as they travel over the bridge. */
+export type StatsSummaryDto = z.infer<typeof statsSummarySchema>
+/** Result of `stats:summary`. */
+export type StatsSummaryResultDto = z.infer<typeof statsSummaryResultSchema>
+
 /** Format an export is written in. */
 export const exportFormatSchema = z.enum(['json', 'markdown'])
 
@@ -529,6 +562,12 @@ export type ImportRequest = z.infer<typeof importRequestSchema>
 export type ExportResultDto = z.infer<typeof exportResultSchema>
 /** Result of `data:import`. */
 export type ImportResultDto = z.infer<typeof importResultSchema>
+
+/** Aggregate statistics. */
+export interface StatsApi {
+  /** Every number the Statistics view shows, in one round trip. */
+  summary(request: { taskDate: string }): Promise<StatsSummaryResultDto>
+}
 
 /** Import and export, over native file dialogs. */
 export interface DataApi {
@@ -617,6 +656,8 @@ export interface TaskDiaryApi {
   tasks: TaskApi
   /** Phase 5 import and export, over native file dialogs. */
   data: DataApi
+  /** Phase 5 aggregate statistics. */
+  stats: StatsApi
   /** Phase 3 tags. */
   tags: TagApi
   /** Phase 2 native menu accelerators. */

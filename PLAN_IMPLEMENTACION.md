@@ -193,11 +193,12 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ### Fase 5 · Recurrencia, estadísticas e import/export — 1,5 días
 
-- [ ] `core/recurrence.ts` + tests exhaustivos (diario, semanal, días concretos, `until`)
-- [ ] Materialización perezosa de ocurrencias al abrir cada día
-- [ ] Canal `day:summary` y `stats:summary` + `DaySummaryDto`
-- [ ] Vista de Estadísticas con tarjetas y gráficos
-- [ ] Exportar a Markdown y JSON (dialogs nativos); importar desde JSON y CSV
+- [x] `core/recurrence.ts` + tests exhaustivos (diario, semanal, días concretos, `until`)
+- [x] Migración `0004_series_id`: una serie tiene identidad propia, no su fecha de origen
+- [x] Materialización perezosa de ocurrencias al abrir cada día
+- [x] `DaySummaryDto` ya existía desde la Fase 4; `stats:summary` añade racha, media y totales
+- [x] Vista de Estadísticas con tarjetas y gráfico semanal, ruta `/stats`
+- [x] Exportar a Markdown y JSON (dialogs nativos); importar desde JSON y CSV
 
 **Entregable:** MVP completo.
 
@@ -389,6 +390,12 @@ Definidas **30 días después de instalar la v1.0**.
 | ADR-023 | El tiempo real de una tarea completada es `completed_at - started_at`; sin columna nueva, y lo no medido se reporta como tal | Aceptada (Fase 4) |
 | ADR-024 | La vista activa vive en la ruta (`/week/:date`), no en Zustand: la URL responde a fecha y vista a la vez | Aceptada (Fase 4) |
 | ADR-025 | Semana, Mes y Heatmap leen agregados por día, nunca tareas | Aceptada (Fase 4) |
+| ADR-026 | Una serie recurrente tiene identidad propia (`series_id`), no su fecha de origen | Aceptada (Fase 5) |
+| ADR-027 | Una tarea recurrente es su propia primera ocurrencia: `task_date = rrule_from` | Aceptada (Fase 5) |
+| ADR-028 | La materialización ocurre dentro de `listByDate`, en una transacción, idempotente | Aceptada (Fase 5) |
+| ADR-029 | Importar rechaza el archivo entero ante una sola tarea inválida; nunca un subconjunto | Aceptada (Fase 5) |
+| ADR-030 | Ninguna ruta cruza el bridge: el renderer pide un formato, el main abre el diálogo | Aceptada (Fase 5) |
+| ADR-031 | La racha se cuenta hacia atrás desde hoy; un hoy sin terminar no la rompe | Aceptada (Fase 5) |
 
 ---
 

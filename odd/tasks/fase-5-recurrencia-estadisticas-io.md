@@ -78,36 +78,36 @@ escritas dejan datos que nadie nota hasta que son caros.
 ## Tareas
 
 ### T5.1 · Motor de recurrencia
-- [ ] `core/recurrence.ts` puro: `occursOn(series, date)`.
-- [ ] `daily`, `weekly` con días concretos, `monthly`, `weekdays`.
-- [ ] `interval` respetado en cada frecuencia.
-- [ ] `until` en el pasado → ninguna ocurrencia futura.
-- [ ] Una serie `none` nunca ocurre.
+- [x] `core/recurrence.ts` puro: `occursOn(series, date)`.
+- [x] `daily`, `weekly` con días concretos, `monthly`, `weekdays`.
+- [x] `interval` respetado en cada frecuencia.
+- [x] `until` en el pasado → ninguna ocurrencia futura.
+- [x] Una serie `none` nunca ocurre.
 
 ### T5.2 · Materialización perezosa
-- [ ] `materializeDay()` en una transacción.
-- [ ] Idempotente: el índice único `(rrule_from, task_date)` cierra la carrera.
-- [ ] Invocada desde `listByDate`.
-- [ ] Las ocurrencias heredan título, notas, horas, estimación y etiquetas de la serie.
+- [x] `materializeDay()` en una transacción.
+- [x] Idempotente: el índice único `(rrule_from, task_date)` cierra la carrera.
+- [x] Invocada desde `listByDate`.
+- [x] Las ocurrencias heredan título, notas, horas, estimación y etiquetas de la serie.
 
 ### T5.3 · Estadísticas
-- [ ] `stats:summary` en SQL, no en el renderer.
-- [ ] Racha actual y máxima, completadas hoy, media semanal, tiempo total, cumplimiento.
-- [ ] Sin `completed_min`: el tiempo total sale de `completed_at - started_at`.
+- [x] `stats:summary` en SQL, no en el renderer.
+- [x] Racha actual y máxima, completadas hoy, media semanal, tiempo total, cumplimiento.
+- [x] Sin `completed_min`: el tiempo total sale de `completed_at - started_at`.
 
 ### T5.4 · Vista de Estadísticas
-- [ ] Tarjetas + gráfico semanal.
-- [ ] Ruta `/stats`.
+- [x] Tarjetas + gráfico semanal.
+- [x] Ruta `/stats`.
 
 ### T5.5 · Exportar
-- [ ] JSON con cada campo y su tipo.
-- [ ] Markdown legible.
-- [ ] `dialog.showSaveDialog` en el main; el renderer nunca toca el disco.
+- [x] JSON con cada campo y su tipo.
+- [x] Markdown legible.
+- [x] `dialog.showSaveDialog` en el main; el renderer nunca toca el disco.
 
 ### T5.6 · Importar
-- [ ] JSON y CSV.
-- [ ] Validación completa antes de escribir.
-- [ ] Una sola transacción; un fallo no deja nada a medias.
+- [x] JSON y CSV.
+- [x] Validación completa antes de escribir.
+- [x] Una sola transacción; un fallo no deja nada a medias.
 
 ## Criterios de aceptación
 
@@ -126,4 +126,50 @@ escritas dejan datos que nadie nota hasta que son caros.
 
 ## Estado
 
-En curso.
+**Completa.** 427 tests, smoke de Fase 5 **21/21**, sin regresión en las Fases 1–4
+(37/37 · 30/30 · 40/40 · 30/30).
+
+### Los cinco criterios
+
+1. **Serie semanal, exactamente una vez por día.** El smoke lee un día vence ocho veces y
+   obtiene `[1,1,1,1,1,1,1,1]`.
+2. **`until` en el pasado.** La serie produce su último día y ninguno después.
+3. **Exportar y reimportar.** Cubierto por `transfer-roundtrip.test.ts` (13 casos), que
+   compara campo a campo contra una base nueva. El diálogo nativo no se puede automatizar por
+   CDP, y el smoke comprueba lo que sí se puede: que el canal rechaza un payload inválido y
+   el diario queda intacto.
+4. **JSON inválido sin corromper.** Una fila mala de nueve importa cero. El parser rechaza
+   antes de abrir la transacción; `importMany` envuelve el lote en una sola.
+5. **Duplicados.** El índice único sobre `(series_id, task_date)` rechaza la segunda fila.
+
+### Migración `0004`, y por qué hacía falta
+
+`0001` indexaba de forma única `(rrule_from, task_date)`. `rrule_from` es una **fecha**, y una
+fecha no identifica una serie: dos tareas recurrentes creadas el mismo día compartían origen y
+la segunda moría con `UNIQUE constraint failed`. Crear «Standup» y «Gimnasio» como series
+diarias — el uso más ordinario que tiene la función — era imposible. Lo encontró el hook de
+revisión bloqueando el commit mientras aún lo comprobaba.
+
+### Tres decisiones que el plan no tomaba
+
+- **El "real" de las Estadísticas no necesita columna**: sale de `completed_at - started_at`,
+  igual que en la Fase 4.
+- **La racha se cuenta hacia atrás desde hoy.** Medir desde el último día completado daría 0
+  cada mañana, y ese número existe justo para mirarlo por la mañana.
+- **La barra semanal tiene siete días, no los transcurridos.** Un gráfico que crece una
+  columna al día cambia de ancho bajo el lector.
+
+### Bugs encontrados en la fase
+
+Diez, ocho de ellos míos y tres por el hook de revisión: el `writeUpdate` que reventaba al
+editar los días de una serie; la fusión con `??` que impedía borrar una lista de días; el
+índice de `0001` que hacía imposible tener dos series el mismo día; el lector CSV lanzando en
+lugar de rechazar; `rruleInterval` sin validar y `Number('abc')` pasando como `NaN`;
+`parseWeekdays` descartando en silencio lo que no entendía; `setState` síncrono en un efecto;
+el gráfico semanal de ancho variable; y tres aserciones mías que construían ficheros o tareas
+imposibles y luego fallaban por la razón equivocada.
+
+### Fuera de alcance
+
+Copias de seguridad automáticas en `userData/backups/` (§15.4): es infraestructura de
+despliegue. Reordenación, undo, paleta de comandos y notificaciones son Fase 6.

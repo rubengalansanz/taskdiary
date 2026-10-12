@@ -8,17 +8,18 @@
  */
 
 /** A view of the diary. */
-export type ViewMode = 'day' | 'week' | 'month' | 'heatmap'
+export type ViewMode = 'day' | 'week' | 'month' | 'heatmap' | 'stats'
 
 /** Every view, in the order the title bar shows them. */
-export const VIEW_MODES: readonly ViewMode[] = ['day', 'week', 'month', 'heatmap']
+export const VIEW_MODES: readonly ViewMode[] = ['day', 'week', 'month', 'heatmap', 'stats']
 
 /** Button label per view, in Spanish (ADR-015). */
 export const VIEW_LABELS: Readonly<Record<ViewMode, string>> = {
   day: 'Día',
   week: 'Semana',
   month: 'Mes',
-  heatmap: 'Actividad'
+  heatmap: 'Actividad',
+  stats: 'Estadísticas'
 }
 
 /**

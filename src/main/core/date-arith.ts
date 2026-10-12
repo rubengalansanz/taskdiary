@@ -148,6 +148,19 @@ export function addMonths(value: string, delta: number): string {
 }
 
 /**
+ * Monday of the week a day belongs to.
+ *
+ * ISO weeks, which start on Monday. `isoWeekday` returns 7 for Sunday, so Sunday steps back
+ * six days rather than zero — treating it as the first day would place it in the *next* week.
+ *
+ * @param value A valid `YYYY-MM-DD`.
+ * @returns The Monday of that week.
+ */
+export function startOfWeek(value: string): string {
+  return addDays(value, -(isoWeekday(value) - 1))
+}
+
+/**
  * Lexicographic comparison of two local dates.
  *
  * `YYYY-MM-DD` sorts correctly as a string, which is why the whole codebase compares dates
