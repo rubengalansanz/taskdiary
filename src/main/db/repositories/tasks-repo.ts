@@ -288,9 +288,7 @@ export class TasksRepository {
     // `toTask` maps one row and knows nothing of `task_tags`, so the series' tags are read
     // separately. Without this an occurrence materialises unlabelled, and a sidebar filtered
     // by a tag quietly stops showing the series it was filtering.
-    const originTags = this.tags
-      .listForTask(origin.id)
-      .map((tag) => tag.name)
+    const originTags = this.tags.listForTask(origin.id).map((tag) => tag.name)
 
     // An occurrence is new work nobody has done yet: `pending`, with no `started_at` and no
     // `completed_at`. Copying the series' status would paint the heatmap green for days
@@ -330,7 +328,6 @@ export class TasksRepository {
     if (originTags.length > 0) {
       this.tags.setForTask(id, originTags)
     }
-
   }
 
   /**
@@ -861,7 +858,7 @@ export class TasksRepository {
    * @returns Completed days, totals and the week average.
    */
   stats(today: string): StatsTotals {
-    const weekStart = addDays(startOfWeek(today), 0)
+    const weekStart = startOfWeek(today)
 
     // Bounded by the week: materialises a week of recurring series, nothing older.
     this.materializeRange(weekStart, today)

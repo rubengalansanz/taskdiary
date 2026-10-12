@@ -38,3 +38,5 @@ coverage/
 
 # Sesiones
 session-*
+__pycache__/
+*.pyc

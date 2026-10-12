@@ -81,6 +81,7 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
               label="Racha actual"
               value={stats?.currentStreak}
               loading={isLoading}
+
               suffix="días"
               testId="stat-streak"
             />
@@ -88,6 +89,7 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
               label="Racha máxima"
               value={stats?.longestStreak}
               loading={isLoading}
+
               suffix="días"
               testId="stat-longest"
             />
@@ -95,12 +97,14 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
               label="Esta semana"
               value={stats?.weekDone}
               loading={isLoading}
+
               suffix={`/ ${stats?.weekDaysElapsed ?? '—'} días`}
             />
             <Card
               label="Tiempo real"
               value={stats === undefined ? undefined : stats.realMin}
               loading={isLoading}
+
               format="duration"
               testId="stat-real"
             />
@@ -108,6 +112,7 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
               label="Cumplimiento"
               value={stats === undefined ? undefined : Math.round(stats.complianceRatio * 100)}
               loading={isLoading}
+
               suffix="%"
               testId="stat-compliance"
             />
@@ -117,8 +122,7 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
             <p className="text-muted-foreground text-xs" data-testid="stats-unmeasured">
               {stats.unmeasuredDone}{' '}
               {stats.unmeasuredDone === 1 ? 'tarea completada' : 'tareas completadas'} sin
-              cronómetro, excluida{' '}
-              {stats.unmeasuredDone === 1 ? 'del tiempo real' : 'del tiempo real'}.
+              cronómetro, excluida del tiempo real.
             </p>
           )}
 
@@ -129,7 +133,11 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
               {stats?.week.map((day, index) => (
                 <WeekBar
                   key={day.date}
-                  label={WEEKDAY_SHORT[(index + new Date(`${day.date}T00:00:00Z`).getUTCDay() + 6) % 7]}
+                  // `stats.week` is built from `startOfWeek` and walked forward, so the index
+                  // already is the weekday. Deriving it from a `Date` would contradict ADR-003
+                  // — and that string is UTC midnight, so behind a negative offset it names
+                  // the previous day.
+                  label={WEEKDAY_SHORT[index % 7]}
                   done={day.done}
                   total={day.total}
                   date={day.date}
@@ -148,7 +156,8 @@ export function StatsView({ taskDate }: StatsViewProps): React.JSX.Element {
 interface CardProps {
   label: string
   value: number | undefined
-  loading: boolean
+  /** True while the first read for this view is still in flight. */
+  loading?: boolean
   suffix?: string
   format?: 'number' | 'duration'
   testId?: string
@@ -157,21 +166,33 @@ interface CardProps {
 /**
  * Renders one statistic.
  *
- * An em dash until the number arrives, never a zero: a card that reads 0 while loading claims
- * the user has done nothing, which is the one thing a statistics screen must never assert
- * without knowing.
+ * Says "Cargando…" until the read lands and an em dash afterwards, never a zero. A card that
+ * reads 0 while loading claims the user has done nothing, which is the one thing a statistics
+ * screen must never assert without knowing.
+ *
+ * Every card takes the same `loading`, because they all come from one `stats:summary` round
+ * trip and cannot settle independently. The file's own rule is that six cards filling in at
+ * different times read as six different states — which is an argument for one flag passed six
+ * times, not for five of them left out.
  *
  * @param props Label, value and how to render it.
  * @returns The card element.
  */
-function Card({ label, value, loading, suffix, format = 'number', testId }: CardProps): React.JSX.Element {
+function Card({
+  label,
+  value,
+  loading = false,
+  suffix,
+  format = 'number',
+  testId
+}: CardProps): React.JSX.Element {
   return (
     <div className="border-border rounded-md border p-3">
       <p className="text-muted-foreground text-xs">{label}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums" data-testid={testId}>
         {value === undefined
           ? loading
-            ? '—'
+            ? 'Cargando…'
             : '—'
           : format === 'duration'
             ? formatMinutesSigned(value)
@@ -213,7 +234,10 @@ function WeekBar({ label, done, total, date, onOpen }: WeekBarProps): React.JSX.
       className="flex w-10 flex-col items-center gap-1"
       onClick={onOpen}
     >
-      <span className="bg-primary/80 rounded-t" style={{ height: `${height}px`, width: '1.5rem' }} />
+      <span
+        className="bg-primary/80 rounded-t"
+        style={{ height: `${height}px`, width: '1.5rem' }}
+      />
       <span className="text-muted-foreground text-[10px]">{label}</span>
       <span className="text-muted-foreground text-[10px] tabular-nums">{done}</span>
     </button>

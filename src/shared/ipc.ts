@@ -10,14 +10,18 @@ import { MAX_TAG_LENGTH, MIN_TAG_LENGTH } from './tags'
  *
  * Two kinds of import live here, and the distinction matters:
  *
- * - **Types** the renderer needs at compile time (`TaskDto`, `TaskStatusDto`) are *not*
- *   imported by renderer code. It cannot reach them: the ambient `window.taskDiary`
- *   declaration in `src/preload/index.d.ts` re-publishes them as globals.
- * - **Values** — the Zod schemas — *are* imported at runtime, by the task form and by the
- *   API layer. That is deliberate: running the same schema in the renderer before the
- *   round trip is what makes the two validation layers provably identical instead of two
- *   copies that drift. It stays safe because this module pulls in nothing privileged, so
- *   importing it grants the renderer no capability it did not already have.
+ * - **Types and values** are both imported by renderer code: `TaskDto` and `StatsSummaryDto`
+ *   at compile time, the Zod schemas at runtime by the task form and the API layer. The
+ *   ambient `window.taskDiary` declaration in `src/preload/index.d.ts` re-publishes the types
+ *   as globals too, so both routes work and the imports are what the code actually uses.
+ *   Running the same schema in the renderer before the round trip is what makes the two
+ *   validation layers provably identical instead of two copies that drift. It stays safe
+ *   because this module pulls in nothing privileged, so importing it grants the renderer no
+ *   capability it did not already have.
+ *
+ *   This replaced an earlier claim here that renderer code imports *neither* types nor
+ *   values. The code had drifted from the comment and the comment was the half that was
+ *   wrong: a type import grants nothing at runtime, and the schemas were already imported.
  *
  * Adding a channel means adding it here, adding a Zod schema, and registering a handler.
  * Nothing else grants the renderer a capability.
