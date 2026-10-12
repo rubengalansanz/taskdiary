@@ -4,6 +4,8 @@ import { buildLikePattern, buildSearchText } from '../../core/search'
 import type { TagsRepository } from './tags-repo'
 import { AppError, APP_ERROR_MESSAGES } from '../../core/errors'
 import { toAuditTimestamp } from '../../core/datetime'
+import { occursOn } from '../../core/recurrence'
+import { addDays } from '../../core/date-arith'
 import {
   diffTaskForUpdate,
   WRITABLE_TASK_FIELDS,
@@ -15,6 +17,7 @@ import {
 } from '../../core/task'
 import {
   assertFocusAvailable,
+  assertOriginIsFirstOccurrence,
   assertStatusTransition,
   assertTimeRange,
   normalizeRecurrence,
@@ -204,6 +207,128 @@ export class TasksRepository {
   }
 
   /**
+   * Materialises the occurrences due in an inclusive range, inside one transaction.
+   *
+   * ADR-004 chose lazy materialisation over an expanded row per occurrence, so this is where a
+   * series turns into real rows. It runs from `listByDate` and `listByRange` because those are
+   * the operations the user triggers by opening a day: splitting it into a separate channel
+   * would leave a window in which the Week view counts a series the Day view has not
+   * materialised yet, and the two would disagree about the same week.
+   *
+   * Three layers keep an occurrence from being written twice, and the transaction is only the
+   * first of them: the engine decides whether the day is due, `idx_tasks_occurrence` rejects a
+   * second row for the same `(rrule_from, task_date)`, and the transaction means a crash
+   * between two inserts leaves a whole series rather than a prefix of one.
+   *
+   * @param fromDate First day of the range to materialise.
+   * @param toDate Last day of the range, inclusive.
+   */
+  materializeRange(fromDate: string, toDate: string): void {
+    if (fromDate > toDate) {
+      return
+    }
+
+    const insert = this.database.transaction(() => {
+      // Only the origin row can start a series. Occurrences carry the series' `rrule_from`
+      // too, so selecting on `task_date = rrule_from` keeps them from being treated as
+      // series of their own and multiplying the work on every read.
+      const series = this.database
+        .prepare(
+          `SELECT ${TASK_COLUMNS}
+             FROM tasks
+            WHERE rrule_freq <> 'none'
+              AND rrule_from IS NOT NULL
+              AND task_date = rrule_from
+              AND rrule_from <= ?
+              AND (rrule_until IS NULL OR rrule_until >= ?)
+            ORDER BY rrule_from ASC`
+        )
+        .all(toDate, fromDate) as TaskRow[]
+
+      for (const row of series) {
+        const origin = toTask(row)
+
+        for (let day = fromDate; day <= toDate; day = addDays(day, 1)) {
+          if (!occursOn(origin, day)) {
+            continue
+          }
+
+          this.insertOccurrence(origin, day)
+        }
+      }
+    })
+
+    insert()
+  }
+
+  /**
+   * Writes one occurrence of a series on a day, if it is not there yet.
+   *
+   * The existence check is the cheap guard for the common case — a day read twice — and the
+   * unique index is what closes the race when two reads overlap.
+   *
+   * @param origin The series row.
+   * @param taskDate The day the occurrence belongs to.
+   */
+  private insertOccurrence(origin: Task, taskDate: string): void {
+    const existing = this.database
+      .prepare('SELECT 1 AS present FROM tasks WHERE rrule_from = ? AND task_date = ?')
+      .get(origin.rruleFrom, taskDate)
+
+    if (existing !== undefined) {
+      return
+    }
+
+    const now = toAuditTimestamp()
+    const id = randomUUID()
+    // `toTask` maps one row and knows nothing of `task_tags`, so the series' tags are read
+    // separately. Without this an occurrence materialises unlabelled, and a sidebar filtered
+    // by a tag quietly stops showing the series it was filtering.
+    const originTags = this.tags
+      .listForTask(origin.id)
+      .map((tag) => tag.name)
+
+    // An occurrence is new work nobody has done yet: `pending`, with no `started_at` and no
+    // `completed_at`. Copying the series' status would paint the heatmap green for days
+    // nobody worked, and `done` is terminal (ADR-014), so such a row could never be reopened.
+    this.database
+      .prepare(
+        `INSERT INTO tasks (
+           id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
+           rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
+           created_at, updated_at, started_at, completed_at, search_text
+         ) VALUES (
+           @id, @title, @notes, @taskDate, 'pending', @startMin, @endMin, @estimateMin, @color,
+           @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
+           @createdAt, @updatedAt, NULL, NULL, @searchText
+         )`
+      )
+      .run({
+        id,
+        title: origin.title,
+        notes: origin.notes,
+        taskDate,
+        startMin: origin.startMin,
+        endMin: origin.endMin,
+        estimateMin: origin.estimateMin,
+        color: origin.color,
+        rruleFreq: origin.rruleFreq,
+        rruleInterval: origin.rruleInterval,
+        rruleDays: origin.rruleDays === null ? null : origin.rruleDays.join(','),
+        rruleUntil: origin.rruleUntil,
+        rruleFrom: origin.rruleFrom,
+        createdAt: now,
+        updatedAt: now,
+        searchText: buildSearchText(origin.title, origin.notes)
+      })
+
+    if (originTags.length > 0) {
+      this.tags.setForTask(id, originTags)
+    }
+
+  }
+
+  /**
    * Returns the tasks of a single calendar day, ordered by start time.
    *
    * Unscheduled tasks (`start_min IS NULL`) sort last rather than first: the Day view is
@@ -213,6 +338,8 @@ export class TasksRepository {
    * @returns The day's tasks.
    */
   listByDate(taskDate: string): Task[] {
+    this.materializeRange(taskDate, taskDate)
+
     const rows = this.database
       .prepare(
         `SELECT ${TASK_COLUMNS}
@@ -244,6 +371,8 @@ export class TasksRepository {
         { field: 'fromDate' }
       )
     }
+
+    this.materializeRange(fromDate, toDate)
 
     const rows = this.database
       .prepare(
@@ -282,6 +411,8 @@ export class TasksRepository {
         { field: 'fromDate' }
       )
     }
+
+    this.materializeRange(fromDate, toDate)
 
     const rows = this.database
       .prepare(
@@ -389,6 +520,9 @@ export class TasksRepository {
   create(input: NewTaskInput): Task {
     const id = randomUUID()
     const now = toAuditTimestamp()
+    const recurrence = normalizeRecurrence(input)
+
+    assertOriginIsFirstOccurrence(input.taskDate, recurrence)
 
     this.database
       .prepare(
@@ -411,7 +545,7 @@ export class TasksRepository {
         endMin: input.endMin,
         estimateMin: input.estimateMin,
         color: input.color,
-        ...toRecurrenceColumns(normalizeRecurrence(input)),
+        ...toRecurrenceColumns(recurrence),
         createdAt: now,
         updatedAt: now,
         searchText: buildSearchText(input.title, input.notes)

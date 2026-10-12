@@ -306,7 +306,44 @@ export function normalizeRecurrence(input: RecurrenceInput): RecurrenceInput {
     assertLocalDate(input.rruleFrom)
   }
 
+  if (input.rruleUntil !== null && input.rruleFrom !== null && input.rruleUntil < input.rruleFrom) {
+    throw new AppError(
+      'VALIDATION_FAILED',
+      'La repetición no puede terminar antes de empezar.',
+      { field: 'rruleUntil' }
+    )
+  }
+
   return input
+}
+
+/**
+ * Reports whether a recurring task's first occurrence is the row itself.
+ *
+ * The materialiser recognises a series by `task_date = rrule_from`: that is what tells the
+ * origin row apart from the occurrences derived from it, since both carry the same
+ * `rrule_from`. A series whose row sat on some other day would therefore never be found and
+ * would quietly produce nothing, forever.
+ *
+ * Two ways to close that: reject the shape, or widen the materialiser's query until it can
+ * find a template row. The second trades a silent failure for a permanent scan of every
+ * occurrence on every day read, so the rule is stated instead: a recurring task's own row is
+ * its first occurrence, and `taskDate` is that day.
+ *
+ * @param input Task date and the normalised recurrence fields.
+ * @throws AppError `VALIDATION_FAILED` when a recurring task does not sit on its own origin.
+ */
+export function assertOriginIsFirstOccurrence(
+  taskDate: string,
+  recurrence: RecurrenceInput
+): void {
+  if (recurrence.rruleFreq !== 'none' && recurrence.rruleFrom !== taskDate) {
+    throw new AppError(
+      'VALIDATION_FAILED',
+      'Una tarea recurrente debe empezar el día en que se crea: esa es su primera ocurrencia.',
+      { field: 'rruleFrom' }
+    )
+  }
 }
 
 /**
