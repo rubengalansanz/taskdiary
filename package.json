@@ -44,7 +44,8 @@
     "react-router-dom": "7.18.4",
     "tailwind-merge": "^3.7.0",
     "zod": "4.6.5",
-    "zustand": "5.0.15"
+    "zustand": "5.0.15",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "2.0.0",

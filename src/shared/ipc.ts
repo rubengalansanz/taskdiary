@@ -522,17 +522,30 @@ export type StatsSummaryDto = z.infer<typeof statsSummarySchema>
 export type StatsSummaryResultDto = z.infer<typeof statsSummaryResultSchema>
 
 /** Format an export is written in. */
-export const exportFormatSchema = z.enum(['json', 'markdown'])
+export const exportFormatSchema = z.enum(['json', 'markdown', 'csv', 'xlsx', 'xls', 'ods'])
 
 /** Request for `data:export`. Opens a native save dialog, so it carries no path. */
 export const exportRequestSchema = z.object({
   format: exportFormatSchema
 })
 
-/** Request for `data:import`. Opens a native open dialog, so it carries no path. */
+/**
+ * Request for `data:import`. Opens a native open dialog, so it carries no path.
+ *
+ * Markdown is deliberately absent. It is a projection of a task — it has no notes, estimate,
+ * colour, recurrence or timestamp — so importing one would quietly overwrite real values with
+ * blanks. Export-only is the honest choice, and it is why `exportFormatSchema` is wider than
+ * this one.
+ */
 export const importRequestSchema = z.object({
-  format: z.enum(['json', 'csv'])
+  format: z.enum(['json', 'csv', 'xlsx', 'xls', 'ods'])
 })
+
+/** A format an export can be written in. Wider than the import list on purpose. */
+export type ExportFormat = z.infer<typeof exportFormatSchema>
+
+/** A format an import can be read from. Markdown is not one of them. */
+export type ImportFormat = z.infer<typeof importRequestSchema>['format']
 
 /** Result of `data:export`. `cancelled` is not a failure. */
 export const exportResultSchema = z.discriminatedUnion('ok', [

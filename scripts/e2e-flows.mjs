@@ -237,13 +237,39 @@ try {
   const menu = await app.waitFor(
     `(() => {
        const items = [...document.querySelectorAll('[data-slot="dropdown-menu-item"]')]
-       return items.length === 4 ? items.map((i) => i.textContent.trim()) : null
+       return items.length === 11 ? items.map((i) => i.textContent.trim()) : null
      })()`
   )
 
+  // The labels are asserted, not the count alone: a count of nine is also true if the same
+  // format appears three times and another is missing, which is the failure that would hurt.
+  const EXPECTED_MENU = [
+    'Como JSON',
+    'Como Markdown',
+    'Como CSV',
+    'Como Excel (.xlsx)',
+    'Como Excel 97-2003 (.xls)',
+    'Como OpenDocument (.ods)',
+    'Desde JSON',
+    'Desde CSV',
+    'Desde Excel (.xlsx)',
+    'Desde Excel 97-2003 (.xls)',
+    'Desde OpenDocument (.ods)'
+  ]
+
   check(
-    'el menú de datos ofrece exportar e importar en ambos formatos',
-    Array.isArray(menu) && menu.length === 4,
+    'el menú de datos ofrece exportar en seis formatos e importar en cinco',
+    Array.isArray(menu) && menu.length === 11,
+    JSON.stringify(menu)
+  )
+
+  check(
+    'cada formato aparece con su nombre real, y Markdown solo se exporta',
+    Array.isArray(menu) &&
+      menu.filter((item) => item.startsWith('Como ')).join('|') ===
+        EXPECTED_MENU.slice(0, 6).join('|') &&
+      menu.filter((item) => item.startsWith('Desde ')).join('|') ===
+        EXPECTED_MENU.slice(6).join('|'),
     JSON.stringify(menu)
   )
 

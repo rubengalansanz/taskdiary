@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import type { ExportFormat, ImportFormat } from '../../../shared/ipc'
 import { exportDiary, importDiary, TaskApiError } from '../shared/api/tasks-api'
 import { Button } from '../components/ui/button'
 import {
@@ -76,7 +77,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
   }, [])
 
   const doExport = useCallback(
-    (format: 'json' | 'markdown') =>
+    (format: ExportFormat) =>
       void run(async () => {
         const result = await exportDiary({ format })
 
@@ -90,7 +91,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
   )
 
   const doImport = useCallback(
-    (format: 'json' | 'csv') =>
+    (format: ImportFormat) =>
       void run(async () => {
         const result = await importDiary({ format })
 
@@ -122,10 +123,7 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
 
         <DropdownMenuContent>
           <DropdownMenuLabel>Exportar</DropdownMenuLabel>
-          <DropdownMenuItem
-            data-testid="data-export-json"
-            onSelect={() => doExport('json')}
-          >
+          <DropdownMenuItem data-testid="data-export-json" onSelect={() => doExport('json')}>
             Como JSON
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -134,21 +132,36 @@ export function DataMenu({ onImported }: DataMenuProps): React.JSX.Element {
           >
             Como Markdown
           </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-export-csv" onSelect={() => doExport('csv')}>
+            Como CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-export-xlsx" onSelect={() => doExport('xlsx')}>
+            Como Excel (.xlsx)
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-export-xls" onSelect={() => doExport('xls')}>
+            Como Excel 97-2003 (.xls)
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-export-ods" onSelect={() => doExport('ods')}>
+            Como OpenDocument (.ods)
+          </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 
           <DropdownMenuLabel>Importar</DropdownMenuLabel>
-          <DropdownMenuItem
-            data-testid="data-import-json"
-            onSelect={() => doImport('json')}
-          >
+          <DropdownMenuItem data-testid="data-import-json" onSelect={() => doImport('json')}>
             Desde JSON
           </DropdownMenuItem>
-          <DropdownMenuItem
-            data-testid="data-import-csv"
-            onSelect={() => doImport('csv')}
-          >
+          <DropdownMenuItem data-testid="data-import-csv" onSelect={() => doImport('csv')}>
             Desde CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-import-xlsx" onSelect={() => doImport('xlsx')}>
+            Desde Excel (.xlsx)
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-import-xls" onSelect={() => doImport('xls')}>
+            Desde Excel 97-2003 (.xls)
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="data-import-ods" onSelect={() => doImport('ods')}>
+            Desde OpenDocument (.ods)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
