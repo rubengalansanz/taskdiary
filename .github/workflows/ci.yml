@@ -1,0 +1,100 @@
+name: CI
+
+# Every push and pull request runs the same gate locally and here. The phases that mattered
+# most — a form that parsed its tags and saved something else, an index that made two
+# recurring series impossible on the same day — all shipped with a green local suite, because
+# nothing ran the app end to end until now.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push supersedes the previous run. Queued runs for the same ref are pointless work.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, tipos y tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Lint, typecheck and the unit suite. Fast, and it catches the majority of regressions
+      # before anything launches a browser.
+      - name: Verificar
+        run: npm run verify
+
+  end-to-end:
+    name: Flujos sobre la app real
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # better-sqlite3 is a native module. It ships prebuilds for the Node ABI, but the E2E run
+      # loads it inside Electron, whose ABI differs — so the rebuild is not optional here.
+      - name: Reconstruir para Electron
+        run: npx electron-builder install-app-deps
+
+      - name: Construir
+        run: npx electron-vite build
+
+      # Electron needs a display. Without xvfb it exits with "Unable to open X display", which
+      # is a runner problem wearing the costume of a test failure.
+      - name: Flujos end-to-end
+        run: xvfb-run --auto-servernum node scripts/e2e-flows.mjs
+
+  smoke:
+    name: Smokes de fase
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx electron-builder install-app-deps
+
+      # Each phase's acceptance criteria, over the real process. Split into one job per group so
+      # a failure names the phase it belongs to instead of "the smokes are red".
+      - name: Fase 1 — datos y seguridad
+        run: xvfb-run --auto-servernum node scripts/fase1-smoke.mjs
+
+      - name: Fase 2 — vista Día
+        run: xvfb-run --auto-servernum node scripts/fase2-smoke.mjs
+
+      - name: Fase 3 — etiquetas y búsqueda
+        run: xvfb-run --auto-servernum node scripts/fase3-smoke.mjs
+
+      - name: Fase 4 — vistas Semana, Mes y Heatmap
+        run: xvfb-run --auto-servernum node scripts/fase4-smoke.mjs
+
+      - name: Fase 5 — recurrencia, estadísticas e io
+        run: xvfb-run --auto-servernum node scripts/fase5-smoke.mjs

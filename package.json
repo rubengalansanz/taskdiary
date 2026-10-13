@@ -17,13 +17,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "electron-vite build && node scripts/e2e-flows.mjs",
     "smoke": "electron-vite build && node scripts/fase1-smoke.mjs",
     "smoke:ui": "electron-vite build && node scripts/fase2-smoke.mjs",
     "smoke:tags": "electron-vite build && node scripts/fase3-smoke.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test",
     "smoke:views": "electron-vite build && node scripts/fase4-smoke.mjs",
-    "smoke:io": "electron-vite build && node scripts/fase5-smoke.mjs"
+    "smoke:io": "electron-vite build && node scripts/fase5-smoke.mjs",
+    "prepare": "husky",
+    "smoke:all": "electron-vite build && node scripts/fase1-smoke.mjs && node scripts/fase2-smoke.mjs && node scripts/fase3-smoke.mjs && node scripts/fase4-smoke.mjs && node scripts/fase5-smoke.mjs",
+    "ci": "npm run verify && node scripts/e2e-flows.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "3.0.2",
@@ -75,5 +78,17 @@
     "typescript-eslint": "8.71.1",
     "vite": "7.3.7",
     "vitest": "5.0.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{mjs,js}": [
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css,sql}": [
+      "prettier --write"
+    ]
   }
 }

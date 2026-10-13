@@ -74,6 +74,7 @@ export function TaskRow({
       </span>
 
       <span
+        data-testid="task-row-title"
         className={`min-w-0 flex-1 truncate text-sm ${task.status === 'done' ? 'line-through' : ''}`}
       >
         {task.title}

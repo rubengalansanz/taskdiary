@@ -1,0 +1,12 @@
+# Pre-commit: fast checks on staged files, then the AI review.
+#
+# Husky sets `core.hooksPath` to `.husky/_`, which makes git ignore
+# `.git/hooks/pre-commit` entirely. The Gentleman Guardian Angel hook lived there, so adding
+# Husky without this line would have stopped the review from running — silently, and only
+# noticeable the next time it failed to catch something.
+
+npx --no-install lint-staged
+
+# Kept second, and kept at all: it caught an index that made two recurring series impossible on
+# the same day, and a writer that crashed when you edited a series' weekdays.
+gga run
