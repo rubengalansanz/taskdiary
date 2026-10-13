@@ -256,7 +256,11 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 - [ ] Tests unitarios de `core/` (100 %) y de los repositorios
 - [ ] Tests del contrato IPC con Zod (entradas inválidas rechazadas)
-- [ ] Tests E2E con Playwright sobre `_electron.launch()` (crear → completar → navegar → exportar)
+- [x] E2E sobre el proceso real (crear → completar → navegar → buscar → reabrir) — **no** con Playwright: su lanzador de Electron espera el anuncio del inspector de Node que Electron 44 no le emite en este stack. Los flujos van por CDP contra el mismo proceso, puente y fichero SQLite
+- [x] `scripts/lib/cdp.mjs` compartido: los seis smokes llevaban cada uno su copia del harness
+- [x] CI en GitHub Actions: lint+tipos+unit primero, luego flujos y un paso por fase
+- [x] Husky + lint-staged, encadenados **con** el hook de revisión por IA (`core.hooksPath` haría que git ignorase `.git/hooks/pre-commit`)
+- [ ] Tests E2E con Playwright — bloqueado por el lanzador; reevaluar en Fase 9 con otra versión de Electron
 - [ ] Lint y formateo en el pipeline
 
 **Entregable:** pipeline verde.
