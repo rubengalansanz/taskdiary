@@ -131,7 +131,14 @@ console.log(`userData: ${userDataDir}\n`)
 
 const child = spawn(
   electron,
-  ['.', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`],
+  [
+    '.',
+    // Chromium's sandbox needs a setuid helper a CI runner does not provide, and the
+    // app exits at startup without one. Linux only, so a desktop keeps the protection.
+    ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${userDataDir}`
+  ],
   {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -159,12 +166,15 @@ try {
   check('task:summaryRange is exposed', surface.summaryRange === 'function', surface.summaryRange)
 
   // --- Seed a spread of days so the aggregate has something to aggregate -------------
-  const today = await run(socketUrl, `(() => {
+  const today = await run(
+    socketUrl,
+    `(() => {
      const d = new Date()
      const iso = (x) => x.toISOString().slice(0, 10)
      const back = (n) => iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - n)))
      return { today: back(0), yesterday: back(1), twoDaysAgo: back(2), threeDaysAgo: back(3), lastWeek: back(9), twoWeeksAgo: back(30) }
-   })()`)
+   })()`
+  )
 
   const seeded = await run(
     socketUrl,
@@ -292,7 +302,11 @@ try {
     balance?.done === 1 && balance?.unmeasuredDone === 1 && balance?.realMin === 0,
     JSON.stringify(balance)
   )
-  check('and it does not inflate the day as finished work twice', balance?.total === 1, `total=${balance?.total}`)
+  check(
+    'and it does not inflate the day as finished work twice',
+    balance?.total === 1,
+    `total=${balance?.total}`
+  )
 
   const inverted = await run(
     socketUrl,
@@ -318,7 +332,11 @@ try {
 })()`
   )
   check('the heatmap draws 182 cells', grid.cells === 182, `cells=${grid.cells}`)
-  check('and days with work are not marked empty', grid.done > 0 && grid.empty > 0, JSON.stringify(grid))
+  check(
+    'and days with work are not marked empty',
+    grid.done > 0 && grid.empty > 0,
+    JSON.stringify(grid)
+  )
 
   // Hover first, so the tooltip is on screen when the click lands.
   const hovered = await run(
@@ -333,8 +351,15 @@ try {
   )
   check('a completed day exists to click', hovered.found === true, JSON.stringify(hovered))
 
-  const tooltip = await run(socketUrl, `document.querySelector('[data-testid="heatmap-tooltip"]')?.textContent ?? null`)
-  check('hovering shows a tooltip with the day detail', Boolean(tooltip) && tooltip.includes(hovered.date), String(tooltip))
+  const tooltip = await run(
+    socketUrl,
+    `document.querySelector('[data-testid="heatmap-tooltip"]')?.textContent ?? null`
+  )
+  check(
+    'hovering shows a tooltip with the day detail',
+    Boolean(tooltip) && tooltip.includes(hovered.date),
+    String(tooltip)
+  )
 
   await run(
     socketUrl,
@@ -420,7 +445,11 @@ try {
     JSON.stringify(week)
   )
 
-  await run(socketUrl, `(() => { window.location.hash = '#/month/2026-10-15'; return true })()`, 300)
+  await run(
+    socketUrl,
+    `(() => { window.location.hash = '#/month/2026-10-15'; return true })()`,
+    300
+  )
   const monthGrid = await poll(
     socketUrl,
     `(() => {
@@ -433,7 +462,11 @@ try {
        } : null
      })()`
   )
-  check('the month view routes from the URL', monthGrid?.hash === '#/month/2026-10-15', monthGrid?.hash)
+  check(
+    'the month view routes from the URL',
+    monthGrid?.hash === '#/month/2026-10-15',
+    monthGrid?.hash
+  )
   check(
     'and draws a whole-month grid',
     monthGrid?.cells % 7 === 0 && monthGrid?.inMonth === 31,

@@ -131,7 +131,14 @@ console.log(`userData: ${userDataDir}\n`)
 
 const child = spawn(
   electron,
-  ['.', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`],
+  [
+    '.',
+    // Chromium's sandbox needs a setuid helper a CI runner does not provide, and the
+    // app exits at startup without one. Linux only, so a desktop keeps the protection.
+    ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${userDataDir}`
+  ],
   {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -188,7 +195,11 @@ try {
        rruleDays: [1, 3], rruleUntil: null, rruleFrom: ${J(dates.monday)}
      }).then(r => r.ok ? r.task.id : 'ERROR: ' + r.error.message)`
   )
-  check('a weekly series is created', typeof weekly === 'string' && weekly.length > 10, String(weekly))
+  check(
+    'a weekly series is created',
+    typeof weekly === 'string' && weekly.length > 10,
+    String(weekly)
+  )
 
   const readManyTimes = await run(
     `(() => {
@@ -295,7 +306,11 @@ try {
     duplicate.secondOk === false || duplicate.count === 1,
     JSON.stringify(duplicate)
   )
-  check('and the day still holds exactly one occurrence', duplicate.count === 1, `count=${duplicate.count}`)
+  check(
+    'and the day still holds exactly one occurrence',
+    duplicate.count === 1,
+    `count=${duplicate.count}`
+  )
 
   // --- Criteria 3 and 4: what can be checked without driving an OS dialog ------------
   // The dialogs are native chrome and cannot be driven over CDP. These check the two halves
@@ -346,7 +361,11 @@ try {
                 compliance: document.querySelector('[data-testid="stat-compliance"]')?.textContent.trim() }
      })()`
   )
-  check('the statistics screen shows a streak', stats !== null && /\d/.test(stats.streak ?? ''), JSON.stringify(stats))
+  check(
+    'the statistics screen shows a streak',
+    stats !== null && /\d/.test(stats.streak ?? ''),
+    JSON.stringify(stats)
+  )
   check('and a bar for each day of the week', stats?.bars === 7, `bars=${stats?.bars}`)
 
   // --- The title bar fits, and the window never scrolls sideways ---------------------
@@ -433,7 +452,6 @@ try {
     dataMenu?.trigger === true && dataMenu?.items === 4 && dataMenu?.flatBefore === 0,
     JSON.stringify(dataMenu)
   )
-
 
   // --- The aggregate sees what the day view sees ------------------------------------
   const expanded = await run(

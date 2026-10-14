@@ -98,7 +98,14 @@ console.log(`userData: ${userDataDir}\n`)
 
 const child = spawn(
   electron,
-  ['.', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`],
+  [
+    '.',
+    // Chromium's sandbox needs a setuid helper a CI runner does not provide, and the
+    // app exits at startup without one. Linux only, so a desktop keeps the protection.
+    ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${userDataDir}`
+  ],
   {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
