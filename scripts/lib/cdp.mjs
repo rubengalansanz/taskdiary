@@ -67,7 +67,7 @@ async function waitForCdp(port, timeoutMs = 30_000) {
  * @param {string} expression JavaScript, possibly a promise.
  * @returns {Promise<unknown>} Whatever the expression resolved to.
  */
-function evaluate(socketUrl, expression) {
+function evaluate(socketUrl, expression, onDeadSocket) {
   return new Promise((resolvePromise, rejectPromise) => {
     const socket = new WebSocket(socketUrl)
     const id = 1
@@ -98,14 +98,22 @@ function evaluate(socketUrl, expression) {
         const wrapper = message.result?.result?.value
 
         if (!wrapper?.ok) {
-          rejectPromise(new Error(`el renderer lanzó: ${wrapper?.e}`))
+          rejectPromise(new Error(`el renderer lanzó: ${wrapper?.e ?? 'sin detalle'}`))
         } else {
           resolvePromise(wrapper.v)
         }
       }
     })
 
-    socket.addEventListener('error', rejectPromise)
+    // A socket dying is only a crash when nobody asked the app to stop. `close()` sends SIGTERM
+    // and the socket dies with it, which used to surface as "el renderer lanzó: undefined" and
+    // failed the run that had just closed the app on purpose -- a coin flip, not a signal.
+    socket.addEventListener('error', () => {
+      rejectPromise(onDeadSocket ? onDeadSocket() : new Error('el socket del renderer se cerró'))
+    })
+    socket.addEventListener('close', () => {
+      rejectPromise(onDeadSocket ? onDeadSocket() : new Error('el socket del renderer se cerró'))
+    })
   })
 }
 
@@ -144,6 +152,9 @@ export async function launchApp(port, reuseUserDataDir) {
   )
 
   let output = ''
+  // Set before the kill in `close`, so an in-flight evaluate knows the socket dying is the
+  // plan rather than a failure.
+  let stoppedOnPurpose = false
   child.stdout.on('data', (chunk) => (output += chunk))
   child.stderr.on('data', (chunk) => (output += chunk))
 
@@ -163,8 +174,15 @@ ${output.trim() || '(ninguna)'}`)
 
   // The renderer mounts after the theme bridge resolves; without this the first assertion can
   // run against a document that does not exist yet.
-  await evaluate(
-    socketUrl,
+  const runEval = (expression) =>
+    evaluate(socketUrl, expression, () =>
+      stoppedOnPurpose
+        ? new Error('la app se cerró mientras esperaba una respuesta del renderer')
+        : new Error(`el renderer se cerró inesperadamente
+${output.trim() || '(sin salida)'}`)
+    )
+
+  await runEval(
     `new Promise(resolve => {
        const tick = () => {
          if (document.querySelector('[data-testid="title-bar"]')) resolve(true)
@@ -175,9 +193,9 @@ ${output.trim() || '(ninguna)'}`)
   )
 
   return {
-    eval: (expression) => evaluate(socketUrl, expression),
+    eval: (expression) => runEval(expression),
     expectEval: async (expression, message) => {
-      const value = await evaluate(socketUrl, expression)
+      const value = await runEval(expression)
 
       if (!value) {
         throw new Error(`${message} — valor: ${JSON.stringify(value)}`)
@@ -190,7 +208,7 @@ ${output.trim() || '(ninguna)'}`)
       let last
 
       while (Date.now() < deadline) {
-        last = await evaluate(socketUrl, expression)
+        last = await runEval(expression)
 
         if (last) {
           return last
@@ -204,6 +222,7 @@ ${output.trim() || '(ninguna)'}`)
     logs: () => output,
     userDataDir,
     close: async (options = {}) => {
+      stoppedOnPurpose = true
       const exited = new Promise((resolveExit) => child.once('exit', resolveExit))
       child.kill()
       // The profile stays locked until the process is really gone, and rmSync throws EPERM
