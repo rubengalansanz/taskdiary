@@ -447,9 +447,13 @@ try {
        return { trigger: true, label, items, flatBefore }
      })()`
   )
+  // Eleven since the spreadsheet formats landed: six exports (JSON, Markdown, CSV, xlsx, xls,
+  // ods) and five imports (no Markdown, which cannot be read back without losing data). The
+  // count is asserted because the point of the menu is that it stays one control however many
+  // formats it carries — `flatBefore` is what catches it regressing into flat buttons.
   check(
-    'import and export live behind one menu, not four buttons',
-    dataMenu?.trigger === true && dataMenu?.items === 4 && dataMenu?.flatBefore === 0,
+    'import and export live behind one menu, not a row of buttons',
+    dataMenu?.trigger === true && dataMenu?.items === 11 && dataMenu?.flatBefore === 0,
     JSON.stringify(dataMenu)
   )
 
