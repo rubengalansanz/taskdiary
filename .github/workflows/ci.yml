@@ -95,6 +95,12 @@ jobs:
 
       - run: npx electron-builder install-app-deps
 
+      # `out/` is gitignored, so a fresh checkout has no renderer bundle and the app starts with
+      # nothing to show. The end-to-end job already builds; this one never did, and every phase
+      # smoke died waiting for a DevTools endpoint the app never opened.
+      - name: Construir
+        run: npx electron-vite build
+
       # Each phase's acceptance criteria, over the real process. Split into one job per group so
       # a failure names the phase it belongs to instead of "the smokes are red".
       - name: Fase 1 — datos y seguridad
