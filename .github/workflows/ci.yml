@@ -53,19 +53,11 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      # A bare ubuntu-latest image carries none of Electron's shared libraries. `xvfb-run`
-      # supplies a display, not the libraries: without this the app dies before the first
-      # assertion, and a runner problem arrives dressed as a broken test.
-      #
-      # Ubuntu 24.04 renamed several of these to a `t64` variant, so both spellings are tried.
-      # A miss is not fatal on its own — the step that actually runs the app is the real gate,
-      # and its error names the missing library instead of "the smokes are red".
       - name: Librerías de sistema para Electron
-        run: |
-          sudo apt-get update
-          for pkg in libgtk-3-0 libgtk-3-0t64 libnotify4 libnss3 libxss1 libxtst6                      libatk1.0-0 libatk1.0-0t64 libatspi2.0-0 libatspi2.0-0t64                      libsecret-1-0 libasound2 libasound2t64 libgbm1 xdg-utils; do
-            sudo apt-get install -y --no-install-recommends "$pkg" || true
-          done
+        run: bash scripts/ci/install-electron-libs.sh
+
+      - name: Descargar el binario de Electron
+        run: node node_modules/electron/install.js
 
       # better-sqlite3 is a native module. It ships prebuilds for the Node ABI, but the E2E run
       # loads it inside Electron, whose ABI differs — so the rebuild is not optional here.
@@ -93,21 +85,14 @@ jobs:
           node-version: 22
           cache: npm
 
-      # A bare ubuntu-latest image carries none of Electron's shared libraries. `xvfb-run`
-      # supplies a display, not the libraries: without this the app dies before the first
-      # assertion, and a runner problem arrives dressed as a broken test.
-      #
-      # Ubuntu 24.04 renamed several of these to a `t64` variant, so both spellings are tried.
-      # A miss is not fatal on its own — the step that actually runs the app is the real gate,
-      # and its error names the missing library instead of "the smokes are red".
-      - name: Librerías de sistema para Electron
-        run: |
-          sudo apt-get update
-          for pkg in libgtk-3-0 libgtk-3-0t64 libnotify4 libnss3 libxss1 libxtst6                      libatk1.0-0 libatk1.0-0t64 libatspi2.0-0 libatspi2.0-0t64                      libsecret-1-0 libasound2 libasound2t64 libgbm1 xdg-utils; do
-            sudo apt-get install -y --no-install-recommends "$pkg" || true
-          done
-
       - run: npm ci
+
+      - name: Librerías de sistema para Electron
+        run: bash scripts/ci/install-electron-libs.sh
+
+      - name: Descargar el binario de Electron
+        run: node node_modules/electron/install.js
+
       - run: npx electron-builder install-app-deps
 
       # Each phase's acceptance criteria, over the real process. Split into one job per group so
