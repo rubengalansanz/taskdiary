@@ -128,9 +128,14 @@ export async function launchApp(port, reuseUserDataDir) {
     process.platform === 'win32' ? 'electron.exe' : 'electron'
   )
 
+  // Chromium's sandbox needs a setuid helper that a CI runner does not provide, and the app
+  // exits on startup without it — with a message that never reached the log, see below. Linux
+  // only: on a desktop this flag would turn off a protection for no reason.
+  const sandboxFlags = process.platform === 'linux' ? ['--no-sandbox'] : []
+
   const child = spawn(
     electron,
-    ['.', `--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`],
+    ['.', ...sandboxFlags, `--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`],
     {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -142,7 +147,19 @@ export async function launchApp(port, reuseUserDataDir) {
   child.stdout.on('data', (chunk) => (output += chunk))
   child.stderr.on('data', (chunk) => (output += chunk))
 
-  const socketUrl = await waitForCdp(port)
+  let socketUrl
+  try {
+    socketUrl = await waitForCdp(port)
+  } catch (cause) {
+    // Whatever the app printed is the only thing that explains a startup failure, and this used
+    // to be thrown away. A CI log reading "el endpoint de DevTools no llegó a levantarse" with
+    // no indication whether the app crashed, printed a sandbox error or is merely slow sends
+    // the next reader to guess.
+    child.kill()
+    throw new Error(`${cause.message}
+--- salida de Electron ---
+${output.trim() || '(ninguna)'}`)
+  }
 
   // The renderer mounts after the theme bridge resolves; without this the first assertion can
   // run against a document that does not exist yet.
