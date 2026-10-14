@@ -1,12 +1,34 @@
-import { isAbsolute, join, sep } from 'node:path'
+import { isAbsolute, join, posix, sep, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DATABASE_FILE_NAME, resolveDatabasePath } from './database-path'
 
-const userDataPath = join('C:', 'Users', 'dev', 'AppData', 'Roaming', 'TaskDiary')
+/**
+ * An absolute user data directory.
+ *
+ * This used to be hard-coded as `C:/Users/dev/...`, which is why the suite was green on a
+ * Windows laptop and red on CI: on a POSIX machine `C:` is not a root, so `join` produced
+ * `C:/Users/dev/...` — a *relative* path with an odd first segment. The resolver was never
+ * wrong; the fixture simply assumed the platform the test happened to run on.
+ *
+ * A leading forward slash rather than `resolve(sep, ...)` on purpose. `resolve` would
+ * normalise this to `C:\home\...` on Windows — absolute there, relative under POSIX, and
+ * the trap all over again. A literal `/` is absolute under *both* dialects, so this one
+ * fixture works everywhere.
+ */
+const userDataPath = '/home/dev/AppData/Roaming/TaskDiary'
 
 describe('DATABASE_FILE_NAME', () => {
   it('is the agreed on-disk file name', () => {
     expect(DATABASE_FILE_NAME).toBe('taskdiary.db')
+  })
+})
+
+describe('the fixture itself', () => {
+  it('is an absolute path under both path dialects, not just the host one', () => {
+    // The bug this guards against was invisible on one machine and fatal on another: a suite
+    // that is green locally and red in CI because its fixture assumed a platform.
+    expect(win32.isAbsolute(userDataPath)).toBe(true)
+    expect(posix.isAbsolute(userDataPath)).toBe(true)
   })
 })
 
