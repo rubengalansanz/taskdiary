@@ -161,6 +161,29 @@ describe('TasksRepository.listByDate', () => {
     expect(repository.listByDate(TODAY).map((task) => task.title)).toEqual(['Con hora', 'Sin hora'])
   })
 
+  it('honours the manual order ahead of start time once the day is reordered', () => {
+    const morning = repository.create(newTask({ title: 'Mañana', startMin: 8 * 60 }))
+    const noon = repository.create(newTask({ title: 'Mediodía', startMin: 12 * 60 }))
+    const evening = repository.create(newTask({ title: 'Tarde', startMin: 14 * 60 }))
+
+    repository.setDayOrder(TODAY, [evening.id, noon.id, morning.id])
+
+    expect(repository.listByDate(TODAY).map((task) => task.title)).toEqual([
+      'Tarde',
+      'Mediodía',
+      'Mañana'
+    ])
+  })
+
+  it('rejects a reorder that names a task from another day, leaving stored order untouched', () => {
+    const other = repository.create(newTask({ title: 'Otro día', taskDate: TOMORROW }))
+    const mine = repository.create(newTask({ title: 'Mía' }))
+
+    expect(() => repository.setDayOrder(TODAY, [mine.id, other.id])).toThrow(AppError)
+    expect(repository.listByDate(TODAY).map((task) => task.title)).toEqual(['Mía'])
+    expect(other.taskDate).toBe(TOMORROW)
+  })
+
   it('returns an empty list for a day with no tasks', () => {
     expect(repository.listByDate('2026-01-01')).toEqual([])
   })
