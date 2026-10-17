@@ -2,6 +2,7 @@ import { HashRouter } from 'react-router-dom'
 import { AppRoutes } from './routes/routes'
 import { useGlobalShortcuts } from './hooks/use-shortcuts'
 import { CommandPalette } from './shell/command-palette'
+import { UndoNoticeView } from './shell/undo-notice'
 
 /**
  * Application shell.
@@ -25,6 +26,7 @@ function Shell(): React.JSX.Element {
     <>
       <AppRoutes />
       <CommandPalette />
+      <UndoNoticeView />
     </>
   )
 }

@@ -278,9 +278,29 @@ export const appErrorSchema = z.object({
     .optional()
 })
 
+/**
+ * An opaque token that restores one operation, or nothing at all (Fase 6, S2).
+ *
+ * Absent rather than null when an operation left nothing to undo, so the shape does not have to
+ * promise a string every caller then has to null-check. A caller that does not understand undo
+ * simply never sees the field, which is what keeps the five-command palette and the menus from
+ * growing an opinion about it.
+ */
+export const undoTokenSchema = z.string().min(1)
+
+/**
+ * How long the undo notice stays on screen, in milliseconds (Fase 6, S2).
+ *
+ * Lives here rather than in either process because both sides need the same number: the main
+ * process decides how long a snapshot is actually restorable, and the renderer decides how long
+ * to offer it. If the notice outlived its token the user would get a "Deshacer" that silently
+ * does nothing, which is worse than no notice at all.
+ */
+export const UNDO_NOTICE_MS = 5_000
+
 /** A result that either succeeded or failed. Discriminated by `ok`. */
 export const taskResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), task: taskSchema }),
+  z.object({ ok: z.literal(true), task: taskSchema, undoToken: undoTokenSchema.optional() }),
   z.object({ ok: z.literal(false), error: appErrorSchema })
 ])
 
@@ -297,7 +317,31 @@ export type SummarizeRangeResultDto = z.infer<typeof summarizeRangeResultSchema>
 
 /** A deletion result. `removed` is false when the id did not exist. */
 export const deleteTaskResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), removed: z.boolean() }),
+  z.object({ ok: z.literal(true), removed: z.boolean(), undoToken: undoTokenSchema.optional() }),
+  z.object({ ok: z.literal(false), error: appErrorSchema })
+])
+
+/**
+ * Request for `task:undo`.
+ *
+ * Carries no task fields on purpose. The renderer sends back only what the main process issued,
+ * so the restore cannot be steered into writing something that was never a row in the database.
+ */
+export const undoTaskRequestSchema = z.object({
+  /** Token issued by `task:update` or `task:delete`. */
+  token: undoTokenSchema
+})
+
+/**
+ * Result of `task:undo`.
+ *
+ * `restored: false` is a success, not a failure. By the time the user presses "Deshacer" the
+ * offer may simply have run out, and answering with the error shape would show them a message
+ * about a failure they did not cause and cannot act on. `task` is therefore present only when
+ * something was actually put back.
+ */
+export const undoTaskResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), restored: z.boolean(), task: taskSchema.optional() }),
   z.object({ ok: z.literal(false), error: appErrorSchema })
 ])
 
@@ -412,6 +456,8 @@ export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>
 export type DeleteTaskRequest = z.infer<typeof deleteTaskRequestSchema>
 /** Request for `task:reorder`. */
 export type ReorderTasksRequest = z.infer<typeof reorderTasksRequestSchema>
+/** Request for `task:undo`. */
+export type UndoTaskRequest = z.infer<typeof undoTaskRequestSchema>
 
 /** Result of `task:list` / `task:create` / `task:update` / `task:setStatus`. */
 export type TaskResultDto = z.infer<typeof taskResultSchema>
@@ -419,6 +465,8 @@ export type TaskResultDto = z.infer<typeof taskResultSchema>
 export type TaskListResultDto = z.infer<typeof taskListResultSchema>
 /** Result of `task:delete`. */
 export type DeleteTaskResultDto = z.infer<typeof deleteTaskResultSchema>
+/** Result of `task:undo`. */
+export type UndoTaskResultDto = z.infer<typeof undoTaskResultSchema>
 
 // ---------------------------------------------------------------------------
 // Channels
@@ -444,6 +492,8 @@ export const IPC_CHANNELS = {
   taskUpdate: 'taskdiary:task:update',
   /** Phase 1: delete a task. */
   taskDelete: 'taskdiary:task:delete',
+  /** Fase 6: restore the task an update or a delete undid. */
+  taskUndo: 'taskdiary:task:undo',
   /** Phase 2: move a task through the state machine. */
   taskSetStatus: 'taskdiary:task:set-status',
   /** Phase 6: replace one day's manual order after a drag and drop. */
@@ -502,6 +552,14 @@ export interface TaskApi {
   update(request: UpdateTaskRequest): Promise<TaskResultDto>
   /** Deletes a task; `removed` is false when the id did not exist. */
   delete(request: DeleteTaskRequest): Promise<DeleteTaskResultDto>
+
+  /**
+   * Puts back the task an update or a delete undid (Fase 6, S2).
+   *
+   * Returns `restored: false` rather than failing when the notice has already expired; see
+   * {@link undoTaskResultSchema}.
+   */
+  undo(request: UndoTaskRequest): Promise<UndoTaskResultDto>
   /** Moves a task through the state machine. Registered in Fase 2. */
   setStatus(request: { id: string; status: TaskStatusDto }): Promise<TaskResultDto>
   /**

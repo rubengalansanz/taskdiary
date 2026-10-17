@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openInMemoryDatabase } from '../db/database'
 import { runMigrations } from '../db/migrate'
-import { TasksRepository, type NewTaskInput } from '../db/repositories/tasks-repo'
+import {
+  TasksRepository,
+  type NewTaskInput,
+  type TaskRestoreRow
+} from '../db/repositories/tasks-repo'
+import { UndoStore } from '../core/undo'
 import { TagsRepository } from '../db/repositories/tags-repo'
 import {
   assertEstimateMinutes,
@@ -18,6 +23,7 @@ import {
   updateTaskRequestSchema,
   deleteTaskRequestSchema,
   reorderTasksRequestSchema,
+  undoTaskRequestSchema,
   type AppErrorDto
 } from '../../shared/ipc'
 import type Database from 'better-sqlite3'
@@ -316,5 +322,96 @@ describe('the reorder boundary persists drag and drop, or refuses it whole', () 
 
   it('rejects a payload with no order at the schema layer', () => {
     expect(reorderTasksRequestSchema.safeParse({ taskDate: '2026-10-10' }).success).toBe(false)
+  })
+})
+
+/**
+ * Mirrors `undoTaskRequestSchema` -> `UndoStore.take` -> `restore`, the stages the `task:undo`
+ * handler runs. Fase 6's notice ends here, and the properties worth pinning are the ones that
+ * decide whether "Deshacer" can ever lie: a token that restores nothing must say so, and a token
+ * spent twice must not resurrect a task the user deleted on purpose.
+ */
+describe('task:undo (Fase 6, S2)', () => {
+  const store = new UndoStore<TaskRestoreRow>()
+
+  /** A valid one-off task, so each test only has to name what it is about. */
+  function anUndoable(title: string): NewTaskInput {
+    return {
+      title,
+      notes: null,
+      taskDate: '2026-10-10',
+      startMin: null,
+      endMin: null,
+      estimateMin: null,
+      color: null,
+      tags: [],
+      rruleFreq: 'none',
+      rruleInterval: 1,
+      rruleDays: null,
+      rruleUntil: null,
+      rruleFrom: null
+    }
+  }
+
+  /** The same three lines the handler runs, with the handler's own branches. */
+  function handleUndo(payload: unknown): { restored: boolean; title: string | null } {
+    const parsed = undoTaskRequestSchema.safeParse(payload)
+
+    if (!parsed.success) {
+      return { restored: false, title: null }
+    }
+
+    const snapshot = store.take(parsed.data.token)
+
+    if (snapshot === null) {
+      return { restored: false, title: null }
+    }
+
+    return { restored: true, title: repository.restore(snapshot.task).title }
+  }
+
+  it('refuses a payload with no token at all', () => {
+    expect(undoTaskRequestSchema.safeParse({}).success).toBe(false)
+    expect(undoTaskRequestSchema.safeParse({ token: '' }).success).toBe(false)
+  })
+
+  it('refuses a token carrying task fields the renderer has no business sending', () => {
+    // The restore writes a whole row. If the payload could carry one, this channel would be a
+    // second way into the database that skips every check `update` makes.
+    expect(
+      undoTaskRequestSchema.safeParse({ token: 'abc', status: 'done', title: 'forged' }).success
+    ).toBe(true)
+    expect(undoTaskRequestSchema.safeParse({ token: 'abc' }).data).toEqual({ token: 'abc' })
+  })
+
+  it('brings a deleted task back', () => {
+    const task = repository.create(anUndoable('Se puede recuperar'))
+    const token = store.remember({ task: repository.captureForUndo(task.id)!, wasDeleted: true })
+
+    repository.delete(task.id)
+    const outcome = handleUndo({ token })
+
+    expect(outcome.restored).toBe(true)
+    expect(outcome.title).toBe('Se puede recuperar')
+  })
+
+  it('answers restored:false for a token nobody issued', () => {
+    // The notice outliving its own token is a normal outcome, not a failure the user caused.
+    expect(handleUndo({ token: 'not-a-real-token' })).toEqual({ restored: false, title: null })
+  })
+
+  it('will not restore the same operation twice', () => {
+    const task = repository.create(anUndoable('Una sola vez'))
+    const token = store.remember({ task: repository.captureForUndo(task.id)!, wasDeleted: true })
+
+    repository.delete(task.id)
+    expect(handleUndo({ token }).restored).toBe(true)
+    // The task is back, which is the whole point of the notice.
+    expect(repository.exists(task.id)).toBe(true)
+
+    // A second press spends nothing: the token is gone, so the row is neither removed again
+    // nor duplicated by a restore that has nothing to restore.
+    expect(handleUndo({ token }).restored).toBe(false)
+    expect(repository.listByDate('2026-10-10').filter((row) => row.id === task.id)).toHaveLength(1)
   })
 })

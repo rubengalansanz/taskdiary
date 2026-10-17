@@ -22,6 +22,21 @@ import type { TaskStatusDto } from '../../../shared/ipc'
 /** Modal dialog currently open. `null` means none. */
 export type OpenDialog = 'create' | 'edit' | null
 
+/**
+ * The "Deshacer" notice (Fase 6, S2).
+ *
+ * Held here rather than in the day view because the notice outlives the interaction that caused
+ * it: completing or deleting happens in a view, but the thing the user might click five seconds
+ * later is not that view's business, and a notice that disappeared on navigation would take the
+ * offer away from someone who simply looked away.
+ */
+export interface UndoNotice {
+  /** What happened, in Spanish (ADR-015). */
+  message: string
+  /** Token the main process issued for this one operation. */
+  token: string
+}
+
 /** State and actions of the UI store. */
 interface UiState {
   /** Which modal is open. */
@@ -42,6 +57,8 @@ interface UiState {
   selectedTaskId: string | null
   /** Free text the user typed in the search box, before debouncing. */
   searchQuery: string
+  /** The undo notice on screen, or `null` when there is none. */
+  undoNotice: UndoNotice | null
   /** Statuses the sidebar is filtering by. Empty means every status. */
   statusFilter: TaskStatusDto[]
   /** Tag ids the sidebar is filtering by. Empty means every task. */
@@ -54,6 +71,10 @@ interface UiState {
   openPalette: () => void
   /** Closes the command palette. */
   closePalette: () => void
+  /** Shows the undo notice, replacing any notice already on screen. */
+  showUndoNotice: (notice: UndoNotice) => void
+  /** Takes the undo notice down, whether it expired or was used. */
+  clearUndoNotice: () => void
   /** Selects a row, or clears the selection with `null`. */
   selectTask: (taskId: string | null) => void
   /** Records what the user typed in the search box. */
@@ -86,6 +107,7 @@ export const useUiStore = create<UiState>((set) => ({
   dialog: null,
   editingTaskId: null,
   paletteOpen: false,
+  undoNotice: null,
   selectedTaskId: null,
   searchQuery: '',
   statusFilter: [],
@@ -99,6 +121,10 @@ export const useUiStore = create<UiState>((set) => ({
   openPalette: () => set({ paletteOpen: true }),
 
   closePalette: () => set({ paletteOpen: false }),
+
+  showUndoNotice: (undoNotice) => set({ undoNotice }),
+
+  clearUndoNotice: () => set({ undoNotice: null }),
 
   selectTask: (selectedTaskId) => set({ selectedTaskId }),
 

@@ -12,6 +12,8 @@ import {
   normalizeTitle
 } from '../core/validation'
 import { type TasksRepository } from '../db/repositories/tasks-repo'
+import { UndoStore } from '../core/undo'
+import type { TaskRestoreRow } from '../db/repositories/tasks-repo'
 import type { NewTaskInput, TaskSearchFilter, UpdateTaskInput } from '../db/repositories/tasks-repo'
 import { type TagsRepository } from '../db/repositories/tags-repo'
 import { isValidTagName } from '../../shared/tags'
@@ -27,6 +29,7 @@ import {
   setTaskStatusRequestSchema,
   updateTaskRequestSchema,
   reorderTasksRequestSchema,
+  undoTaskRequestSchema,
   searchTasksRequestSchema,
   IPC_CHANNELS,
   type DeleteTaskRequest,
@@ -41,6 +44,8 @@ import {
   type StatsSummaryResultDto,
   type SummarizeRangeResultDto,
   type TaskResultDto,
+  type UndoTaskRequest,
+  type UndoTaskResultDto,
   type UpdateTaskRequest
 } from '../../shared/ipc'
 import type { Task } from '../core/task'
@@ -65,6 +70,37 @@ import type { Task } from '../core/task'
 
 /** Success half of a single-task result. */
 type TaskOk = Extract<TaskResultDto, { ok: true }>
+type UndoOk = Extract<UndoTaskResultDto, { ok: true }>
+
+/**
+ * Snapshots taken just before an undoable operation (Fase 6, S2).
+ *
+ * Only the last 5 s are worth anything: the notice the user is looking at disappears with them.
+ * A snapshot older than that is not history, it is a row nobody is going to ask for again.
+ */
+const undoStore = new UndoStore<TaskRestoreRow>()
+
+/**
+ * Issues an undo token when the operation was one a notice should offer to reverse.
+ *
+ * Completing is the only update worth undoing: everything else the user can do again by hand,
+ * and a notice that appears on every keystroke-saving edit would be noise. Deletion is always
+ * worth it, because the task is gone and nothing else can bring it back.
+ *
+ * @param repository Source of the snapshot.
+ * @param id Task about to change.
+ * @param wasDeleted Whether the row is about to be removed.
+ * @returns A token, or `undefined` when there was nothing to capture.
+ */
+function captureUndo(
+  repository: TasksRepository,
+  id: string,
+  wasDeleted: boolean
+): string | undefined {
+  const captured = repository.captureForUndo(id)
+
+  return captured === null ? undefined : undoStore.remember({ task: captured, wasDeleted })
+}
 /** Success half of a task-list result. */
 type TaskListOk = Extract<TaskListResultDto, { ok: true }>
 /** Success half of a search. */
@@ -344,9 +380,15 @@ export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsR
       guard((): TaskOk | FailureDto => {
         const request: UpdateTaskRequest = parseOrThrow(updateTaskRequestSchema, payload)
 
+        // Captured before the write, never after: the snapshot has to hold what the task was,
+        // and reading it back once it is already `done` would capture the finished state.
+        const token =
+          request.status === 'done' ? captureUndo(repository, request.id, false) : undefined
+
         return {
           ok: true,
-          task: toTaskDto(repository.update(request.id, toUpdateTaskInput(request)))
+          task: toTaskDto(repository.update(request.id, toUpdateTaskInput(request))),
+          ...(token === undefined ? {} : { undoToken: token })
         }
       })
   )
@@ -357,7 +399,31 @@ export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsR
       guard((): DeleteTaskResultDto | FailureDto => {
         const request: DeleteTaskRequest = parseOrThrow(deleteTaskRequestSchema, payload)
 
-        return { ok: true, removed: repository.delete(request.id) }
+        const token = captureUndo(repository, request.id, true)
+
+        return {
+          ok: true,
+          removed: repository.delete(request.id),
+          ...(token === undefined ? {} : { undoToken: token })
+        }
+      })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.taskUndo,
+    (_event: IpcMainInvokeEvent, payload: unknown): UndoTaskResultDto | FailureDto =>
+      guard((): UndoOk | FailureDto => {
+        const request: UndoTaskRequest = parseOrThrow(undoTaskRequestSchema, payload)
+        const snapshot = undoStore.take(request.token)
+
+        // The token decides the outcome, not the request: an unknown, already-used or expired
+        // one means the notice ran out, which is a success that restored nothing rather than a
+        // failure the user caused.
+        if (snapshot === null) {
+          return { ok: true, restored: false }
+        }
+
+        return { ok: true, restored: true, task: toTaskDto(repository.restore(snapshot.task)) }
       })
   )
 

@@ -83,6 +83,19 @@ export interface CreateTaskInput {
 /** Fields accepted when creating a task: the content plus its recurrence rule. */
 export type NewTaskInput = CreateTaskInput & RecurrenceInput
 
+/**
+ * A task captured for undo: the domain model plus the storage-only column a restore needs.
+ *
+ * `seriesId` is the one piece here that `Task` cannot carry. See {@link
+ * TasksRepository.captureForUndo} for why losing it would quietly break recurring tasks.
+ */
+export interface TaskRestoreRow {
+  /** The task as it was, tags included. */
+  task: Task
+  /** Owning series id for a recurring occurrence, `null` for a one-off task. */
+  seriesId: string | null
+}
+
 /** A tag filter set to apply to a search. Every field is optional and means "no filter". */
 export interface TaskSearchFilter {
   /** Text looked for in the title and notes; folded before matching. */
@@ -779,6 +792,119 @@ export class TasksRepository {
     const result = this.database.prepare('DELETE FROM tasks WHERE id = ?').run(id)
 
     return result.changes > 0
+  }
+
+  /**
+   * Captures everything a faithful restore needs, not just what the domain type carries.
+   *
+   * `Task` on its own is lossy here. A recurring occurrence holds a `series_id` pointing at the
+   * row that owns the rule, and that link is exactly what `materializeRange` follows to produce
+   * the following week. The domain type does not expose it because the renderer has no use for
+   * it, so a snapshot taken from `findById` would come back with the series link gone and the
+   * occurrence would silently become its own series. Tags are loaded the way `findById` loads
+   * them, for the same reason: a snapshot that lost them would restore a task with its labels
+   * stripped.
+   *
+   * @param id Task UUID.
+   * @returns The payload to store against an undo token, or `null` when no row has that id.
+   */
+  captureForUndo(id: string): TaskRestoreRow | null {
+    const row = this.database.prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`).get(id) as
+      TaskRow | undefined
+
+    if (row === undefined) {
+      return null
+    }
+
+    return {
+      task: this.tags
+        .listForTask(id)
+        .reduce<Task>((task, tag) => ({ ...task, tags: [...task.tags, tag.name] }), toTask(row)),
+      seriesId: row.series_id
+    }
+  }
+
+  /**
+   * Writes a captured task back exactly as it was.
+   *
+   * This is the only write in the repository that skips the domain checks, and it is
+   * deliberate: `update` refuses `done -> pending` because `done` is terminal, so an undo
+   * routed through it could never reopen a task. Restoring is not a transition, it is putting
+   * back a row that was already valid; the row, its tags and the derived search text are
+   * written as one unit, the way `create` writes them.
+   *
+   * The upsert covers both cases without branching: undoing a completion meets a row that is
+   * still there, undoing a deletion meets no row at all. `created_at` is deliberately absent
+   * from the conflict clause, because a restore puts the task back with its original creation
+   * time rather than making it new again.
+   *
+   * @param captured A payload from {@link captureForUndo}.
+   * @returns The stored task after the restore.
+   */
+  restore(captured: TaskRestoreRow): Task {
+    const { task, seriesId } = captured
+
+    this.transaction(() => {
+      this.database
+        .prepare(
+          `INSERT INTO tasks (
+             id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
+             rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
+             created_at, updated_at, started_at, completed_at, search_text, series_id, sort_order
+           ) VALUES (
+             @id, @title, @notes, @taskDate, @status, @startMin, @endMin, @estimateMin, @color,
+             @rruleFreq, @rruleInterval, @rruleDays, @rruleUntil, @rruleFrom,
+             @createdAt, @updatedAt, @startedAt, @completedAt, @searchText, @seriesId, @sortOrder
+           )
+           ON CONFLICT(id) DO UPDATE SET
+             title = excluded.title,
+             notes = excluded.notes,
+             task_date = excluded.task_date,
+             status = excluded.status,
+             start_min = excluded.start_min,
+             end_min = excluded.end_min,
+             estimate_min = excluded.estimate_min,
+             color = excluded.color,
+             rrule_freq = excluded.rrule_freq,
+             rrule_interval = excluded.rrule_interval,
+             rrule_days = excluded.rrule_days,
+             rrule_until = excluded.rrule_until,
+             rrule_from = excluded.rrule_from,
+             updated_at = excluded.updated_at,
+             started_at = excluded.started_at,
+             completed_at = excluded.completed_at,
+             search_text = excluded.search_text,
+             series_id = excluded.series_id,
+             sort_order = excluded.sort_order`
+        )
+        .run({
+          id: task.id,
+          title: task.title,
+          notes: task.notes,
+          taskDate: task.taskDate,
+          status: task.status,
+          startMin: task.startMin,
+          endMin: task.endMin,
+          estimateMin: task.estimateMin,
+          color: task.color,
+          rruleFreq: task.rruleFreq,
+          rruleInterval: task.rruleInterval,
+          rruleDays: task.rruleDays === null ? null : task.rruleDays.join(','),
+          rruleUntil: task.rruleUntil,
+          rruleFrom: task.rruleFrom,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          startedAt: task.startedAt,
+          completedAt: task.completedAt,
+          searchText: buildSearchText(task.title, task.notes),
+          seriesId,
+          sortOrder: task.sortOrder
+        })
+
+      this.tags.setForTask(task.id, task.tags)
+    })
+
+    return this.findById(task.id)
   }
 
   /**

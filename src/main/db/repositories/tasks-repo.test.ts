@@ -547,3 +547,101 @@ describe('TasksRepository.transaction', () => {
     expect(rowCount('tasks')).toBe(1)
   })
 })
+
+describe('undoing a completion (S2)', () => {
+  it('puts a completed task back with the status it had', () => {
+    // `create` always lands on `pending`; status only moves through `update`.
+    const task = repository.create(newTask())
+    const captured = repository.captureForUndo(task.id)
+
+    repository.update(task.id, { status: 'done' })
+    expect(repository.findById(task.id).status).toBe('done')
+
+    // `update` refuses `done -> pending`, so this could not be undone as a transition.
+    repository.restore(captured!)
+    expect(repository.findById(task.id).status).toBe('pending')
+  })
+
+  it('gives the task back the completion timestamp it had lost', () => {
+    const task = repository.create(newTask())
+    // Captured before the completion, which is the only order that means anything: the notice
+    // is built from what was true before, not from the finished task.
+    const captured = repository.captureForUndo(task.id)
+
+    repository.update(task.id, { status: 'done' })
+    expect(repository.findById(task.id).completedAt).not.toBeNull()
+
+    repository.restore(captured!)
+    expect(repository.findById(task.id).completedAt).toBeNull()
+  })
+
+  it('keeps the manual position the task had in its day', () => {
+    const task = repository.create(newTask())
+    repository.setDayOrder(TODAY, [task.id])
+    expect(repository.findById(task.id).sortOrder).toBe(0)
+
+    repository.update(task.id, { status: 'done' })
+    repository.restore(repository.captureForUndo(task.id)!)
+    expect(repository.findById(task.id).sortOrder).toBe(0)
+  })
+
+  it('returns nothing to capture for an id that is not there', () => {
+    expect(repository.captureForUndo('00000000-0000-4000-8000-000000000000')).toBeNull()
+  })
+})
+
+describe('undoing a deletion (S2)', () => {
+  it('brings the row back with its content intact', () => {
+    const task = repository.create(newTask({ title: 'Borrar y recuperar', notes: 'contexto' }))
+    const captured = repository.captureForUndo(task.id)
+
+    repository.delete(task.id)
+    expect(repository.exists(task.id)).toBe(false)
+
+    repository.restore(captured!)
+    const restored = repository.findById(task.id)
+    expect(restored.title).toBe('Borrar y recuperar')
+    expect(restored.notes).toBe('contexto')
+  })
+
+  it('brings the tags back with it', () => {
+    const task = repository.create(newTask({ tags: ['proyecto', 'urgente'] }))
+    const captured = repository.captureForUndo(task.id)
+
+    repository.delete(task.id)
+    repository.restore(captured!)
+
+    expect(repository.findById(task.id).tags.sort()).toEqual(['proyecto', 'urgente'])
+  })
+
+  it('keeps the original creation time rather than making the task new again', () => {
+    const task = repository.create(newTask())
+    const captured = repository.captureForUndo(task.id)
+
+    repository.delete(task.id)
+    repository.restore(captured!)
+
+    expect(repository.findById(task.id).createdAt).toBe(task.createdAt)
+  })
+
+  it('keeps a recurring occurrence attached to its series', () => {
+    // The link the domain type cannot carry. Restored with its own id instead, the occurrence
+    // would become its own series and `materializeRange` would treat the wrong row as the root.
+    const series = repository.create(newTask({ rruleFreq: 'weekly', rruleDays: [6] }))
+
+    // Today is Saturday and the rule repeats on Saturday, so the next occurrence is a week out.
+    repository.listByRange(TODAY, '2026-10-20')
+
+    const occurrence = repository.listByDate('2026-10-17').find((row) => row.id !== series.id)
+    expect(occurrence).toBeDefined()
+
+    const captured = repository.captureForUndo(occurrence!.id)
+    repository.delete(occurrence!.id)
+    repository.restore(captured!)
+
+    const stored = database
+      .prepare('SELECT series_id FROM tasks WHERE id = ?')
+      .get(occurrence!.id) as { series_id: string | null }
+    expect(stored.series_id).toBe(series.id)
+  })
+})

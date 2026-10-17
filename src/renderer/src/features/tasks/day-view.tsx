@@ -67,6 +67,7 @@ export function DayRoute(): React.JSX.Element {
   const editingTaskId = useUiStore((state) => state.editingTaskId)
   const openDialog = useUiStore((state) => state.openDialog)
   const closeDialog = useUiStore((state) => state.closeDialog)
+  const showUndoNotice = useUiStore((state) => state.showUndoNotice)
   const selectedTaskId = useUiStore((state) => state.selectedTaskId)
   const selectTask = useUiStore((state) => state.selectTask)
 
@@ -115,7 +116,14 @@ export function DayRoute(): React.JSX.Element {
       setActionError(null)
 
       try {
-        await setTaskStatus(task.id, next)
+        const { undoToken } = await setTaskStatus(task.id, next)
+
+        // Only a completion carries a token, and that is exactly the change the domain will
+        // never let anyone make again on its own.
+        if (undoToken !== undefined) {
+          showUndoNotice({ message: 'Tarea completada', token: undoToken })
+        }
+
         invalidateDate(taskDate)
         invalidateSearches()
         invalidateSummaries()
@@ -129,7 +137,7 @@ export function DayRoute(): React.JSX.Element {
         })
       }
     },
-    [taskDate, refresh]
+    [taskDate, refresh, showUndoNotice]
   )
 
   useCompleteSelected(
@@ -152,7 +160,12 @@ export function DayRoute(): React.JSX.Element {
       setActionError(null)
 
       try {
-        await deleteTask(task.id)
+        const { undoToken } = await deleteTask(task.id)
+
+        if (undoToken !== undefined) {
+          showUndoNotice({ message: 'Tarea eliminada', token: undoToken })
+        }
+
         invalidateDate(taskDate)
         invalidateSearches()
         invalidateTags()
@@ -165,7 +178,7 @@ export function DayRoute(): React.JSX.Element {
         })
       }
     },
-    [taskDate, refresh]
+    [taskDate, refresh, showUndoNotice]
   )
 
   const handleReorder = useCallback(

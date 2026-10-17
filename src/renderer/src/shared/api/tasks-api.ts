@@ -156,11 +156,20 @@ export async function updateTask(request: UpdateTaskRequest): Promise<TaskDto> {
   return unwrap(result).task
 }
 
-/** Moves a task through the state machine. */
-export async function setTaskStatus(id: string, status: TaskStatusDto): Promise<TaskDto> {
+/**
+ * Moves a task through the state machine.
+ *
+ * Hands back the undo token alongside the task when the move completed it. A completion is the
+ * one status change the domain refuses to reverse afterwards — `done` is terminal — so it is the
+ * only one that has to carry the offer back here for the notice to show.
+ */
+export async function setTaskStatus(
+  id: string,
+  status: TaskStatusDto
+): Promise<{ task: TaskDto; undoToken?: string }> {
   const result = await window.taskDiary.tasks.setStatus({ id, status })
 
-  return unwrap(result).task
+  return unwrap(result)
 }
 
 /**
@@ -204,15 +213,41 @@ export async function searchTasks(
   return { tasks: result.tasks, total: result.total, truncated: result.truncated }
 }
 
-/** Deletes a task. */
-export async function deleteTask(id: string): Promise<boolean> {
+/**
+ * Deletes a task, handing back the undo token for the row it removed.
+ *
+ * Always returns a token when there was a row to capture: unlike completing, a deletion has no
+ * other way back, so this is the notice that matters most.
+ */
+export async function deleteTask(id: string): Promise<{ removed: boolean; undoToken?: string }> {
   const result = await window.taskDiary.tasks.delete({ id })
 
   if (!result.ok) {
     throw new TaskApiError(result.error)
   }
 
-  return result.removed
+  return result
+}
+
+/**
+ * Puts back the task an update or a delete undid (Fase 6, S2).
+ *
+ * `false` means the offer had already run out — the token expired, or was already spent. That is
+ * a normal answer and deliberately not a throw: the user did nothing wrong, and the only honest
+ * outcome is that the notice disappears.
+ *
+ * @param token Token the main process issued for the operation.
+ * @returns True when a task was actually restored.
+ * @throws TaskApiError when the main process refuses the request outright.
+ */
+export async function undoTask(token: string): Promise<boolean> {
+  const result = await window.taskDiary.tasks.undo({ token })
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result.restored
 }
 
 /**
