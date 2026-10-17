@@ -29,19 +29,19 @@ Aplicación de escritorio **offline-first** para registrar y consultar las tarea
 
 ## 1. Resumen de fases
 
-| Fase | Nombre | Tiempo | Entregable | Depende de |
-| :--- | --- | :--- | --- | --- |
-| **0** | Cimientos | 1 día | Ventana con estilos, SQLite abierto y `SELECT 1` correcto | — |
-| **1** | Datos | 1 día | Crear y leer tareas desde la ventana | 0 |
-| **2** | Vista Día | 1,5 días | El 80 % del valor del producto ya funciona | 1 |
-| **3** | Etiquetas, búsqueda y filtros | 1 día | Filtrar y buscar en todo el histórico | 2 |
-| **4** | Vistas Semana, Mes y Heatmap | 1,5 días | Visibilidad completa del pasado y del mes | 3 |
-| **5** | Recurrencia, estadísticas e import/export | 1,5 días | **MVP completo** | 4 |
-| **6** | Pulido de UX | 1 día | La app se siente terminada | 5 |
-| **7** | Rendimiento y seguridad | 1 día | Cumple RNF-01..05 y RNF-11/12 | 6 |
-| **8** | Tests y calidad | 1,5 días | Pipeline verde | 7 |
-| **9** | Empaquetado y distribución | 1,5 días | Instalador descargable y autoactualizable | 8 |
-| **10** | Documentación y lanzamiento | ½ día | Notas de la v1.0 | 9 |
+| Fase | Nombre | Tiempo | Entregable | Depende de | Estado |
+| :--- | --- | :--- | --- | --- | --- |
+| **0** | Cimientos | 1 día | Ventana con estilos, SQLite abierto y `SELECT 1` correcto | — | Completada |
+| **1** | Datos | 1 día | Crear y leer tareas desde la ventana | 0 | Completada |
+| **2** | Vista Día | 1,5 días | El 80 % del valor del producto ya funciona | 1 | Completada |
+| **3** | Etiquetas, búsqueda y filtros | 1 día | Filtrar y buscar en todo el histórico | 2 | Completada |
+| **4** | Vistas Semana, Mes y Heatmap | 1,5 días | Visibilidad completa del pasado y del mes | 3 | Completada |
+| **5** | Recurrencia, estadísticas e import/export | 1,5 días | **MVP completo** | 4 | Completada |
+| **6** | Pulido de UX | 1 día | La app se siente terminada | 5 | Completada y verificada |
+| **7** | Rendimiento y seguridad | 1 día | Cumple RNF-01..05 y RNF-11/12 | 6 | Pendiente |
+| **8** | Tests y calidad | 1,5 días | Pipeline verde | 7 | Pendiente |
+| **9** | Empaquetado y distribución | 1,5 días | Instalador descargable y autoactualizable | 8 | Pendiente |
+| **10** | Documentación y lanzamiento | ½ día | Notas de la v1.0 | 9 | Pendiente |
 
 > **Hito del MVP:** fin de la **Fase 5**. Las fases 0–5 entregan el producto utilizable; 6–10 lo endurecen y lo publican.
 
@@ -211,21 +211,49 @@ Aplican a **todas** las fases. Si una fase las contradice, la fase está mal.
 
 ---
 
-### Fase 6 · Pulido de UX — 1 día
+### Fase 6 · Pulido de UX — 1 día — **COMPLETADA**
 
-- [ ] Paleta de comandos (`Ctrl+K`)
-- [ ] Undo para completar/eliminar (con aviso de 5 s)
-- [ ] Reordenación por arrastre en la vista Día
-- [ ] Estados vacíos, esqueleto de carga y mensajes de error claros
-- [ ] Notificaciones nativas para tareas con hora (`Notification` de Electron)
-- [ ] Minimize a bandeja y reaparición desde el tray
+- [x] Paleta de comandos (`Ctrl+K`)
+- [x] Undo para completar/eliminar (con aviso de 5 s)
+- [x] Reordenación por arrastre en la vista Día
+- [x] Estados vacíos, esqueleto de carga y mensajes de error claros
+- [x] Notificaciones nativas para tareas con hora (`Notification` de Electron)
+- [x] Minimize a bandeja y reaparición desde el tray
 
 **Entregable:** la app se siente terminada.
 
 **Criterio de aceptación**
-- Cerrar y abrir la app: los datos persisten.
-- Abrir un enlace externo → se abre en el navegador del sistema, **no dentro de la app**.
-- `app.requestSingleInstanceLock()` evita la instancia duplicada.
+- [x] Cerrar y abrir la app: los datos persisten.
+- [x] Abrir un enlace externo → se abre en el navegador del sistema, **no dentro de la app**.
+- [x] `app.requestSingleInstanceLock()` evita la instancia duplicada.
+
+**Estado (2026-10-17).** Las siete tareas del documento de fase
+(`odd/tasks/fase-6-pulido-ux.md`, S1-S7, L1-L19) están implementadas y las siete verificadas en
+comportamiento. `npm run verify` en 534/534 y los cinco smokes en baseline exacto
+(37/37 - 30/30 - 40/40 - 30/30 - 26/26). Commits `58f099b` (undo), `cd85061` (estados),
+`376c12a` (notificaciones), `43f354d` (tray), `8cecd18` (verificación), mas `ea51a77`
+(PR #1: paleta y arrastre) y `d52c064` (`.gitattributes`).
+
+*Limitaciones anotadas, que no deben leerse como resueltas:*
+- El **clic físico sobre el icono del tray** nunca se ejercitó: no es programático. Todo lo
+  demás de la bandeja sí está verificado, incluido que minimizar **oculte** la ventana
+  (`IsWindowVisible` pasa a `false`) y que una segunda instancia la restaure.
+- La notificación se verificó **a mano** por una persona: el centro de notificaciones del SO no
+  es observable desde el proceso.
+- La revisión del hook de GGA no es una revisión de código: puntúa contra `AGENTS.md`, que es
+  casi enteramente el bloque de CodeGraph.
+
+**Lo que la fase encontró más allá de sus seis entregables.** Los tres llevaban meses instalados
+y ninguno se veía desde los números en verde:
+- La pantalla muerta de S4 **ya existía** y era un panel literalmente vacío, no un texto feo:
+  `DayState.tasks` nunca es `null`, pero `TaskListProps.tasks` estaba tipado como si lo fuera y
+  las cuatro condiciones del render dependían de ese `null`.
+- S2 no podía implementarse como transición: `done` es terminal, así que el undo es un
+  **restore** de un snapshot, y por eso `TasksRepository.restore()` es el único write del
+  repositorio que saltea los chequeos del dominio.
+- La **persistencia nunca se había testeado**: todos los tests corren sobre
+  `openInMemoryDatabase()`, que por definición no sobrevive a nada, y `transfer-roundtrip`
+  abría un *segundo* `openInMemoryDatabase()` - otra base - aparentando verificarlo.
 
 ---
 
