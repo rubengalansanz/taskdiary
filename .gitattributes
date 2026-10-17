@@ -1,0 +1,15 @@
+# Fin de línea, decidido una sola vez y para todos.
+#
+# El repo no tenía .gitattributes y corre con `core.autocrlf=true`, que es el default de Git for
+# Windows. Esa combinación es la causa del `✖ Failed to restore unstaged changes!` de
+# lint-staged: prettier escribe LF, autocrlf espera CRLF en el working tree, y el parche que
+# lint-staged intenta reaplicar después de formatear ya no calza con el árbol que capturó.
+#
+# `eol=lf` lo resuelve como el resto del toolchain ya trabaja: el default de prettier, el índice
+# y la CI en Linux hablan LF. Un checkout en Windows también queda en LF en vez de adivinar.
+* text=auto eol=lf
+
+# Binarios: nunca se tocan ni se traducen.
+*.png binary
+*.gz binary
+*.ico binary
