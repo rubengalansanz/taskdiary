@@ -22,6 +22,7 @@ import migration0001 from '../../../migrations/0001_init.sql?raw'
 import migration0002 from '../../../migrations/0002_started_at.sql?raw'
 import migration0003 from '../../../migrations/0003_search_text.sql?raw'
 import migration0004 from '../../../migrations/0004_series_id.sql?raw'
+import migration0005 from '../../../migrations/0005_sort_order.sql?raw'
 
 /** One numbered schema migration. */
 export interface Migration {
@@ -41,7 +42,8 @@ export const MIGRATIONS: readonly Migration[] = [
   { id: '0001_init', sql: migration0001 },
   { id: '0002_started_at', sql: migration0002 },
   { id: '0003_search_text', sql: migration0003 },
-  { id: '0004_series_id', sql: migration0004 }
+  { id: '0004_series_id', sql: migration0004 },
+  { id: '0005_sort_order', sql: migration0005 }
 ]
 
 /**

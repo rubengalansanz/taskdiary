@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useUiStore } from '../stores/ui-store'
 import { addDays, normalizeDateParam, today } from '../shared/lib/date'
@@ -26,18 +26,24 @@ import { IPC_CHANNELS } from '../../../shared/ipc'
 export const COMPLETE_SELECTED_EVENT = 'taskdiary:complete-selected'
 
 /**
- * Binds the application commands.
+ * The single implementation of every application command.
  *
- * Must be called from inside a `Router` and while the window exists.
+ * Three callers now reach a command — the keyboard, the native menu, and the `Ctrl+K` palette —
+ * and they have to reach the *same* one. Keeping the switch inside `useGlobalShortcuts` would
+ * have forced the palette to grow its own copy, which is exactly the drift the file header warns
+ * against: a palette whose "Día anterior" navigates somewhere the menu's does not. So the switch
+ * lives here and the palette calls it like everyone else.
+ *
+ * Reads the URL and the store when it fires, so it never closes over stale state.
+ *
+ * @returns A function taking a command channel.
  */
-export function useGlobalShortcuts(): void {
+export function useRunCommand(): (channel: string) => void {
   const navigate = useNavigate()
-  const dialog = useUiStore((state) => state.dialog)
   const openDialog = useUiStore((state) => state.openDialog)
-  const closeDialog = useUiStore((state) => state.closeDialog)
 
-  useEffect(() => {
-    function runCommand(channel: string): void {
+  return useCallback(
+    (channel: string): void => {
       switch (channel) {
         case IPC_CHANNELS.menuNewTask:
           openDialog('create')
@@ -62,8 +68,25 @@ export function useGlobalShortcuts(): void {
         default:
           break
       }
-    }
+    },
+    [navigate, openDialog]
+  )
+}
 
+/**
+ * Binds the application commands.
+ *
+ * Must be called from inside a `Router` and while the window exists.
+ */
+export function useGlobalShortcuts(): void {
+  const runCommand = useRunCommand()
+  const dialog = useUiStore((state) => state.dialog)
+  const closeDialog = useUiStore((state) => state.closeDialog)
+  const paletteOpen = useUiStore((state) => state.paletteOpen)
+  const openPalette = useUiStore((state) => state.openPalette)
+  const closePalette = useUiStore((state) => state.closePalette)
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       // Escape closes the dialog and nothing else: an Esc that navigated away would lose
       // the user's place in their own history.
@@ -73,10 +96,28 @@ export function useGlobalShortcuts(): void {
           closeDialog()
         }
 
+        if (paletteOpen) {
+          event.preventDefault()
+          closePalette()
+        }
+
         return
       }
 
       if (!event.ctrlKey && !event.metaKey) {
+        return
+      }
+
+      // While the palette is up it owns every modifier combination: `Ctrl+Left` in there means
+      // "move between palette rows", not "go to the previous day". Letting the day navigation
+      // through would have the palette and the shell fighting over the arrow keys. Only `Ctrl+K`
+      // still belongs to the shell while it is open, and that is handled here.
+      if (paletteOpen) {
+        if (event.key === 'k' || event.key === 'K') {
+          event.preventDefault()
+          closePalette()
+        }
+
         return
       }
 
@@ -103,6 +144,12 @@ export function useGlobalShortcuts(): void {
           runCommand(IPC_CHANNELS.menuToday)
           break
 
+        case 'k':
+        case 'K':
+          event.preventDefault()
+          openPalette()
+          break
+
         default:
           break
       }
@@ -116,7 +163,7 @@ export function useGlobalShortcuts(): void {
       window.removeEventListener('keydown', onKeyDown)
       unsubscribeMenu()
     }
-  }, [navigate, dialog, openDialog, closeDialog])
+  }, [runCommand, dialog, closeDialog, paletteOpen, openPalette, closePalette])
 }
 
 /**

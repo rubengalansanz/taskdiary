@@ -176,6 +176,18 @@ export const deleteTaskRequestSchema = z.object({
   id: taskIdSchema
 })
 
+/**
+ * Request for `task:reorder` — the Day view's order after a drop.
+ *
+ * Carries the whole day, never a single position: the repository replaces the
+ * order in one transaction and refuses anything less than the full day, so a
+ * half-written order cannot exist.
+ */
+export const reorderTasksRequestSchema = z.object({
+  taskDate: localDateSchema,
+  orderedIds: z.array(taskIdSchema).max(500)
+})
+
 /** Request for `task:setStatus` — Fase 2 opens this channel. */
 export const setTaskStatusRequestSchema = z.object({
   id: taskIdSchema,
@@ -230,6 +242,8 @@ export const taskSchema = z.object({
   updatedAt: z.string(),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
+  /** Manual position within its day (Fase 6); `null` keeps time order. */
+  sortOrder: z.number().int().min(0).nullable(),
   tags: z.array(z.string())
 })
 
@@ -396,6 +410,8 @@ export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>
 export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>
 /** Request for `task:delete`. */
 export type DeleteTaskRequest = z.infer<typeof deleteTaskRequestSchema>
+/** Request for `task:reorder`. */
+export type ReorderTasksRequest = z.infer<typeof reorderTasksRequestSchema>
 
 /** Result of `task:list` / `task:create` / `task:update` / `task:setStatus`. */
 export type TaskResultDto = z.infer<typeof taskResultSchema>
@@ -430,6 +446,8 @@ export const IPC_CHANNELS = {
   taskDelete: 'taskdiary:task:delete',
   /** Phase 2: move a task through the state machine. */
   taskSetStatus: 'taskdiary:task:set-status',
+  /** Phase 6: replace one day's manual order after a drag and drop. */
+  taskReorder: 'taskdiary:task:reorder',
   /** Phase 3: search the whole history by text, tags and status. */
   taskSearch: 'taskdiary:task:search',
   /** Phase 5: the numbers the Statistics view shows. */
@@ -467,7 +485,7 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
 /** CRUD surface the preload exposes for tasks. */
 export interface TaskApi {
-  /** Tasks of one calendar day, ordered by start time. */
+  /** Tasks of one calendar day: manual order first, then start time. */
   list(request: ListTasksRequest): Promise<TaskListResultDto>
   /** Every task in an inclusive day range. */
   listRange(request: ListTaskRangeRequest): Promise<TaskListResultDto>
@@ -486,6 +504,14 @@ export interface TaskApi {
   delete(request: DeleteTaskRequest): Promise<DeleteTaskResultDto>
   /** Moves a task through the state machine. Registered in Fase 2. */
   setStatus(request: { id: string; status: TaskStatusDto }): Promise<TaskResultDto>
+  /**
+   * Replaces one day's manual order and returns the day as stored.
+   *
+   * Registered in Fase 6 for drag and drop. The whole day travels in one call on
+   * purpose: per-task positions would land in separate transactions, and a crash
+   * between them would leave half the day reordered.
+   */
+  reorder(request: ReorderTasksRequest): Promise<TaskListResultDto>
   /** Searches the whole history by text, tags and status. */
   search(request: SearchTasksRequest): Promise<SearchTasksResultDto>
 }

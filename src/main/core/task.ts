@@ -65,6 +65,16 @@ export interface Task {
   startedAt: string | null
   /** ISO-8601 UTC completion timestamp, or `null` while not done. */
   completedAt: string | null
+  /**
+   * Manual position within its day (0-based), or `null` when the user never
+   * reordered it.
+   *
+   * Set only by drag and drop in the Day view (Fase 6) through
+   * `TasksRepository.setDayOrder`, the single writer — never through a generic
+   * update, so a half-written order cannot exist. Reads fall back to start time
+   * while it is `null`, which is also why old rows need no back-fill.
+   */
+  sortOrder: number | null
 }
 
 /**

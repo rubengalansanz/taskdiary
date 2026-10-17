@@ -63,6 +63,8 @@ interface TaskRow {
   completed_at: string | null
   /** Identity of the series this row belongs to, or `null` for a one-off. Added by `0004`. */
   series_id: string | null
+  /** Manual position within its day, or `null` when never reordered. Added by `0005`. */
+  sort_order: number | null
 }
 
 /** Non-recurrence fields accepted when creating a task, as they arrive from the IPC layer. */
@@ -123,7 +125,7 @@ const MAX_SEARCH_LIMIT = 500
 const TASK_COLUMNS = `
   id, title, notes, task_date, status, start_min, end_min, estimate_min, color,
   rrule_freq, rrule_interval, rrule_days, rrule_until, rrule_from,
-  created_at, updated_at, started_at, completed_at, series_id
+  created_at, updated_at, started_at, completed_at, series_id, sort_order
 `.trim()
 
 /** Shape of an already-grouped `GROUP BY task_date` row. `SUM` yields numbers, never null. */
@@ -336,6 +338,11 @@ export class TasksRepository {
    * Unscheduled tasks (`start_min IS NULL`) sort last rather than first: the Day view is
    * a timeline, and a task with no time has nowhere to sit on it.
    *
+   * A manually reordered day (`sort_order NOT NULL`, Fase 6) reads in manual order
+   * first; rows the user never touched keep the old time order behind them, so
+   * upgrading never visibly moves anything. Only the Day view honours the manual
+   * order: Week, search and export stay on time order by design (T3 decision).
+   *
    * @param taskDate Local calendar day as `YYYY-MM-DD`.
    * @returns The day's tasks.
    */
@@ -347,11 +354,69 @@ export class TasksRepository {
         `SELECT ${TASK_COLUMNS}
            FROM tasks
           WHERE task_date = ?
-          ORDER BY (start_min IS NULL), start_min ASC, created_at ASC`
+          ORDER BY (sort_order IS NULL), sort_order ASC, (start_min IS NULL), start_min ASC, created_at ASC`
       )
       .all(taskDate) as TaskRow[]
 
     return this.attachTags(rows.map(toTask))
+  }
+
+  /**
+   * Replaces the manual order of one calendar day in a single transaction.
+   *
+   * The only writer of `sort_order`: the Day view hands over the full visible order
+   * after a drop, positions are assigned 0-based in that order, and anything less
+   * than the whole day is rejected — a partial order would leave half the day on
+   * manual positions and half on time order with no way back.
+   *
+   * @param taskDate Local calendar day as `YYYY-MM-DD`.
+   * @param orderedIds Every task id of that day, in the user's order.
+   * @throws AppError `VALIDATION_FAILED` when the list is partial, has duplicates, or
+   *   names a task from another day; `TASK_NOT_FOUND` when an id exists nowhere.
+   */
+  setDayOrder(taskDate: string, orderedIds: string[]): void {
+    const datesById = new Map(
+      (
+        this.database
+          .prepare('SELECT id, task_date FROM tasks WHERE task_date = ?')
+          .all(taskDate) as {
+          id: string
+          task_date: string
+        }[]
+      ).map((row) => [row.id, row.task_date] as const)
+    )
+
+    if (orderedIds.length !== datesById.size || new Set(orderedIds).size !== orderedIds.length) {
+      throw new AppError(
+        'VALIDATION_FAILED',
+        'El nuevo orden debe listar cada tarea del día una sola vez.',
+        { field: 'orderedIds' }
+      )
+    }
+
+    for (const id of orderedIds) {
+      if (!datesById.has(id)) {
+        const elsewhere = this.database
+          .prepare('SELECT 1 AS present FROM tasks WHERE id = ?')
+          .get(id)
+
+        if (elsewhere === undefined) {
+          throw new AppError('TASK_NOT_FOUND', 'La tarea no existe.', { field: 'orderedIds' })
+        }
+
+        throw new AppError('VALIDATION_FAILED', 'El nuevo orden incluye una tarea de otro día.', {
+          field: 'orderedIds'
+        })
+      }
+    }
+
+    this.transaction(() => {
+      const statement = this.database.prepare('UPDATE tasks SET sort_order = ? WHERE id = ?')
+
+      orderedIds.forEach((id, position) => {
+        statement.run(position, id)
+      })
+    })
   }
 
   /**
@@ -1172,6 +1237,7 @@ function toTask(row: TaskRow): Task {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at,
-    completedAt: row.completed_at
+    completedAt: row.completed_at,
+    sortOrder: row.sort_order
   }
 }

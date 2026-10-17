@@ -88,7 +88,7 @@
     "*.{mjs,js}": [
       "prettier --write"
     ],
-    "*.{json,md,yml,yaml,css,sql}": [
+    "*.{json,md,yml,yaml,css}": [
       "prettier --write"
     ]
   }

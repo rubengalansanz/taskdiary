@@ -61,6 +61,7 @@ const tasks: TaskDiaryApi['tasks'] = {
   update: (request) => invoke(IPC_CHANNELS.taskUpdate, request),
   delete: (request) => invoke(IPC_CHANNELS.taskDelete, request),
   setStatus: (request) => invoke(IPC_CHANNELS.taskSetStatus, request),
+  reorder: (request) => invoke(IPC_CHANNELS.taskReorder, request),
   search: (request) => invoke(IPC_CHANNELS.taskSearch, request)
 }
 

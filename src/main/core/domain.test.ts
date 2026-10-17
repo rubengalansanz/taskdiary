@@ -428,6 +428,7 @@ function buildTask(): Task {
     createdAt: '2026-10-10T08:00:00.000Z',
     updatedAt: '2026-10-10T08:00:00.000Z',
     startedAt: null,
-    completedAt: null
+    completedAt: null,
+    sortOrder: null
   }
 }

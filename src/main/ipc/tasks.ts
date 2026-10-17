@@ -26,11 +26,13 @@ import {
   listTasksRequestSchema,
   setTaskStatusRequestSchema,
   updateTaskRequestSchema,
+  reorderTasksRequestSchema,
   searchTasksRequestSchema,
   IPC_CHANNELS,
   type DeleteTaskRequest,
   type DeleteTaskResultDto,
   type ListTaskRangeRequest,
+  type ReorderTasksRequest,
   type TaskDto,
   type TaskListResultDto,
   type SearchTasksResultDto,
@@ -356,6 +358,21 @@ export function registerTaskIpcHandlers(repository: TasksRepository, tags: TagsR
         const request: DeleteTaskRequest = parseOrThrow(deleteTaskRequestSchema, payload)
 
         return { ok: true, removed: repository.delete(request.id) }
+      })
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.taskReorder,
+    (_event: IpcMainInvokeEvent, payload: unknown): TaskListResultDto | FailureDto =>
+      guard((): TaskListOk | FailureDto => {
+        const request: ReorderTasksRequest = parseOrThrow(reorderTasksRequestSchema, payload)
+        const taskDate = assertLocalDate(request.taskDate)
+
+        repository.setDayOrder(taskDate, request.orderedIds)
+
+        // Re-read after the write: the renderer replaces its cache with what is
+        // stored, so a list it never refreshed cannot disagree with the database.
+        return { ok: true, tasks: repository.listByDate(taskDate).map(toTaskDto) }
       })
   )
 

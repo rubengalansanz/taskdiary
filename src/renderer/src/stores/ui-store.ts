@@ -28,6 +28,16 @@ interface UiState {
   dialog: OpenDialog
   /** Id of the task being edited, when `dialog` is `edit`. */
   editingTaskId: string | null
+  /**
+   * Whether the `Ctrl+K` palette is open.
+   *
+   * Deliberately **not** a member of {@link OpenDialog}, even though the palette is modal. The
+   * day view reads `dialog !== null` to decide whether to render the create/edit form, so
+   * folding the palette into that union would open the task form every time the palette
+   * appeared. Separate fields also let each be closed by its own `Escape`, without either
+   * pretending to be the other.
+   */
+  paletteOpen: boolean
   /** Id of the row the user selected, target of Ctrl+Enter. */
   selectedTaskId: string | null
   /** Free text the user typed in the search box, before debouncing. */
@@ -40,6 +50,10 @@ interface UiState {
   openDialog: (dialog: Exclude<OpenDialog, null>, taskId?: string) => void
   /** Closes whichever modal is open. */
   closeDialog: () => void
+  /** Opens the command palette. */
+  openPalette: () => void
+  /** Closes the command palette. */
+  closePalette: () => void
   /** Selects a row, or clears the selection with `null`. */
   selectTask: (taskId: string | null) => void
   /** Records what the user typed in the search box. */
@@ -71,6 +85,7 @@ function toggle<T>(current: T[], value: T): T[] {
 export const useUiStore = create<UiState>((set) => ({
   dialog: null,
   editingTaskId: null,
+  paletteOpen: false,
   selectedTaskId: null,
   searchQuery: '',
   statusFilter: [],
@@ -80,6 +95,10 @@ export const useUiStore = create<UiState>((set) => ({
     set({ dialog, editingTaskId: dialog === 'edit' ? (taskId ?? null) : null }),
 
   closeDialog: () => set({ dialog: null, editingTaskId: null }),
+
+  openPalette: () => set({ paletteOpen: true }),
+
+  closePalette: () => set({ paletteOpen: false }),
 
   selectTask: (selectedTaskId) => set({ selectedTaskId }),
 
