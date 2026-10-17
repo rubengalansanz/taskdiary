@@ -7,6 +7,7 @@ import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/da
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
 import { startTaskReminders } from './notifications'
+import { activateWindow, createAppTray, hideOnMinimize } from './tray'
 import { TagsRepository } from './db/repositories/tags-repo'
 import { registerTaskIpcHandlers } from './ipc/tasks'
 import { registerDataIpcHandlers } from './ipc/data'
@@ -257,19 +258,11 @@ function createWindow(): BrowserWindow {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // Goes through `activateWindow` for the same reason the tray icon does: once minimizing hides
+  // the window, `if (isMinimized()) restore()` no longer covers what the user sees, and focusing
+  // a hidden window looks like the launch was ignored.
   app.on('second-instance', () => {
-    const [existingWindow] = BrowserWindow.getAllWindows()
-
-    if (!existingWindow) {
-      createWindow()
-      return
-    }
-
-    if (existingWindow.isMinimized()) {
-      existingWindow.restore()
-    }
-
-    existingWindow.focus()
+    activateWindow(BrowserWindow.getAllWindows()[0], createWindow)
   })
 
   void app.whenReady().then(() => {
@@ -318,7 +311,30 @@ if (!app.requestSingleInstanceLock()) {
     registerDataIpcHandlers(tasks, () => BrowserWindow.getAllWindows()[0])
 
     buildApplicationMenu()
+
+    // Built before the window so a tray that failed to appear can stop `hideOnMinimize` from
+    // being installed at all. Without a tray there is nowhere to bring the window back from.
+    const tray = createAppTray({
+      // The very same `?asset` import the window icon already uses, so electron-vite resolves it
+      // to wherever the build actually emitted it. Hand-built `join(__dirname, ...)` paths do
+      // not survive bundling: nothing is emitted at `out/resources`, and the tray silently did
+      // not exist.
+      iconPath: icon,
+      onActivate: (): void => {
+        activateWindow(BrowserWindow.getAllWindows()[0], createWindow)
+      },
+      onQuit: (): void => {
+        app.quit()
+      }
+    })
+
     createWindow()
+
+    if (tray !== null) {
+      for (const window of BrowserWindow.getAllWindows()) {
+        hideOnMinimize(window)
+      }
+    }
 
     // Started after the window exists because the loop needs to know whether the app has focus,
     // and because clicking a notification should bring the window forward. Resolved per call
