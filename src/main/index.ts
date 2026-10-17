@@ -6,6 +6,7 @@ import { resolveDatabasePath } from './core/database-path'
 import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/database'
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
+import { startTaskReminders } from './notifications'
 import { TagsRepository } from './db/repositories/tags-repo'
 import { registerTaskIpcHandlers } from './ipc/tasks'
 import { registerDataIpcHandlers } from './ipc/data'
@@ -318,6 +319,28 @@ if (!app.requestSingleInstanceLock()) {
 
     buildApplicationMenu()
     createWindow()
+
+    // Started after the window exists because the loop needs to know whether the app has focus,
+    // and because clicking a notification should bring the window forward. Resolved per call
+    // for the same reason the dialog parent is: the window can be replaced at any time.
+    startTaskReminders({
+      repository: tasks,
+      isFocused: (): boolean => BrowserWindow.getAllWindows()[0]?.isFocused() === true,
+      onActivate: (): void => {
+        const window = BrowserWindow.getAllWindows()[0]
+
+        if (window === undefined) {
+          return
+        }
+
+        if (window.isMinimized()) {
+          window.restore()
+        }
+
+        window.show()
+        window.focus()
+      }
+    })
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
