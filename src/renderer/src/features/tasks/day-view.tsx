@@ -305,6 +305,9 @@ export function DayRoute(): React.JSX.Element {
             tasks={visibleTasks}
             isLoading={isSearching || (!isFiltering && status === 'loading')}
             error={error ?? (search.status === 'error' ? search.error : null)}
+            // Two different reads fail independently, so retry has to re-run whichever one
+            // actually failed: a day refresh does not re-issue the search behind the filters.
+            onRetry={isFiltering ? invalidateSearches : refresh}
             searching={isFiltering}
             selectedTaskId={selectedTaskId}
             onStatusChange={(task, next) => void handleStatusChange(task, next)}

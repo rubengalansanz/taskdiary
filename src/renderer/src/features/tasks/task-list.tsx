@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { TaskRow } from './task-row'
+import { resolveListSurface } from './list-surface'
 import type { TaskDto, TaskStatusDto } from '../../../../shared/ipc'
 import { formatDayHeading } from '../../shared/lib/date'
 
@@ -15,14 +16,24 @@ import { formatDayHeading } from '../../shared/lib/date'
 export interface TaskListProps {
   /** Day being shown, as `YYYY-MM-DD`. */
   taskDate: string
-  /** Its tasks, or `null` while the first read is in flight. */
-  tasks: TaskDto[] | null
+  /**
+   * Its tasks. Empty while the first read is in flight — which is *not* the same as a day with
+   * no tasks, and the surface resolver is what keeps the two apart.
+   */
+  tasks: TaskDto[]
   /** True while a read is in flight. */
   isLoading: boolean
   /** True when the rows come from a search rather than from the day. */
   searching: boolean
   /** Failure message from the last read, or `null`. */
   error: string | null
+  /**
+   * Re-runs the failed read.
+   *
+   * A failure the user cannot retry is the dead end S4 exists to remove, so the error surface
+   * offers this. Absent where there is nothing to re-run.
+   */
+  onRetry?: () => void
   /** Id of the selected row, target of Ctrl+Enter. */
   selectedTaskId: string | null
   /** Requests a status change. */
@@ -50,14 +61,17 @@ export function TaskList({
   isLoading,
   searching,
   error,
+  onRetry,
   selectedTaskId,
   onStatusChange,
   onEdit,
   onDelete,
   onReorder
 }: TaskListProps): React.JSX.Element {
-  const total = tasks?.length ?? 0
-  const done = tasks?.filter((task) => task.status === 'done').length ?? 0
+  const total = tasks.length
+  const done = tasks.filter((task) => task.status === 'done').length
+
+  const surface = resolveListSurface({ isLoading, error, taskCount: total, searching })
 
   // Drag state lives here rather than in the rows: the drop target is a different row
   // from the dragged one, and only the list sees both.
@@ -121,18 +135,30 @@ export function TaskList({
         )}
       </header>
 
-      {error !== null && (
-        <p
+      {surface === 'error' && (
+        <div
           role="alert"
-          className="text-destructive border-destructive rounded-md border p-3 text-sm"
+          data-testid="task-list-error"
+          className="border-destructive rounded-md border p-3"
         >
-          {error}
-        </p>
+          <p className="text-destructive text-sm">{error}</p>
+
+          {onRetry !== undefined && (
+            <button
+              type="button"
+              data-testid="task-list-retry"
+              onClick={onRetry}
+              className="text-foreground mt-2 text-sm font-medium underline underline-offset-2"
+            >
+              Reintentar
+            </button>
+          )}
+        </div>
       )}
 
-      {tasks === null && isLoading && <p className="text-muted-foreground text-sm">Cargando…</p>}
+      {surface === 'loading' && <TaskListSkeleton rows={searching ? 3 : 4} />}
 
-      {tasks !== null && tasks.length === 0 && !isLoading && (
+      {surface === 'empty' && (
         <div className="border-border text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed p-10 text-center">
           {searching ? (
             <>
@@ -151,7 +177,7 @@ export function TaskList({
         </div>
       )}
 
-      {tasks !== null && tasks.length > 0 && (
+      {surface === 'rows' && (
         <ul className="space-y-1">
           {tasks.map((task) => (
             <TaskRow
@@ -176,5 +202,33 @@ export function TaskList({
         </ul>
       )}
     </section>
+  )
+}
+
+/**
+ * Placeholder rows shown while a day is being read.
+ *
+ * Shaped like the real rows on purpose: a centred "Cargando…" in a big empty panel reads as a
+ * broken screen, while a stack of bars reads as content that has not arrived yet. The pulse is
+ * CSS-only so the list never re-renders to animate itself, and `aria-hidden` keeps a screen
+ * reader from announcing three hundred phantom tasks.
+ *
+ * @param props How many placeholder rows to draw.
+ * @returns The skeleton element.
+ */
+function TaskListSkeleton({ rows }: { rows: number }): React.JSX.Element {
+  return (
+    <ul aria-hidden="true" data-testid="task-list-skeleton" className="space-y-1">
+      {Array.from({ length: rows }, (_, index) => (
+        <li
+          key={index}
+          className="border-border animate-pulse rounded-md border p-3"
+          style={{ opacity: 1 - index * 0.18 }}
+        >
+          <div className="bg-muted h-3 w-2/5 rounded" />
+          <div className="bg-muted mt-2 h-2 w-1/4 rounded" />
+        </li>
+      ))}
+    </ul>
   )
 }
