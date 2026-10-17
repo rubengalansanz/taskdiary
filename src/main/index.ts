@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { resolveDatabasePath } from './core/database-path'
+import { isExternalUrlAllowed } from './core/external-url'
 import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/database'
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
@@ -69,16 +70,6 @@ function probeDatabaseAt(filePath: string): TaskDiaryDbProbeResult {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** Only `https:` and `mailto:` may ever reach the user's browser or mail client. */
-function isExternalUrlAllowed(url: string): boolean {
-  try {
-    const { protocol } = new URL(url)
-    return protocol === 'https:' || protocol === 'mailto:'
-  } catch {
-    return false
-  }
 }
 
 function registerIpcHandlers(): void {
