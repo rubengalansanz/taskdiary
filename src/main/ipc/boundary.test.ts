@@ -17,6 +17,7 @@ import {
   listTasksRequestSchema,
   updateTaskRequestSchema,
   deleteTaskRequestSchema,
+  reorderTasksRequestSchema,
   type AppErrorDto
 } from '../../shared/ipc'
 import type Database from 'better-sqlite3'
@@ -244,5 +245,76 @@ describe('list and update payloads are validated before any read or write', () =
 
     expect(repository.delete('no-existe')).toBe(false)
     expect(snapshot()).toBe(before)
+  })
+})
+
+/**
+ * Mirrors `reorderTasksRequestSchema` → `setDayOrder` → re-read, the same stages the
+ * `task:reorder` handler runs. Fase 6's drag and drop ends here: a forged order with
+ * ids from another day must be refused with the stored order untouched.
+ */
+function handleReorder(payload: unknown): { ok: true; titles: string[] } | AppErrorDto {
+  const parsed = reorderTasksRequestSchema.safeParse(payload)
+
+  if (!parsed.success) {
+    return { code: 'VALIDATION_FAILED', message: 'Los datos enviados no son válidos.' }
+  }
+
+  try {
+    const taskDate = assertLocalDate(parsed.data.taskDate)
+
+    repository.setDayOrder(taskDate, parsed.data.orderedIds)
+
+    return { ok: true, titles: repository.listByDate(taskDate).map((task) => task.title) }
+  } catch (error) {
+    return error as AppErrorDto
+  }
+}
+
+describe('the reorder boundary persists drag and drop, or refuses it whole', () => {
+  it('persists the dropped order and reads it back in that order', () => {
+    const base = {
+      ...VALID_CREATE,
+      estimateMin: null,
+      color: null,
+      tags: [],
+      rruleFreq: 'none' as const,
+      rruleInterval: 1,
+      rruleDays: null,
+      rruleUntil: null,
+      rruleFrom: null
+    }
+    const first = repository.create({ ...base, title: 'Primera', taskDate: '2026-10-10' })
+    const second = repository.create({ ...base, title: 'Segunda', taskDate: '2026-10-10' })
+
+    const result = handleReorder({ taskDate: '2026-10-10', orderedIds: [second.id, first.id] })
+
+    expect(result).toEqual({ ok: true, titles: ['Segunda', 'Primera'] })
+  })
+
+  it('refuses an order naming a task from another day, and changes nothing', () => {
+    const base = {
+      ...VALID_CREATE,
+      estimateMin: null,
+      color: null,
+      tags: [],
+      rruleFreq: 'none' as const,
+      rruleInterval: 1,
+      rruleDays: null,
+      rruleUntil: null,
+      rruleFrom: null
+    }
+    const mine = repository.create({ ...base, title: 'Mía', taskDate: '2026-10-10' })
+    const other = repository.create({ ...base, title: 'Ajena', taskDate: '2026-10-11' })
+    const before = snapshot()
+
+    const result = handleReorder({ taskDate: '2026-10-10', orderedIds: [mine.id, other.id] })
+
+    expect(result).toMatchObject({ code: 'VALIDATION_FAILED' })
+    expect(snapshot()).toBe(before)
+  })
+
+  it('rejects a payload with no order at the schema layer', () => {
+    expect(reorderTasksRequestSchema.safeParse({ taskDate: '2026-10-10' }).success).toBe(false)
   })
 })

@@ -34,6 +34,23 @@ export interface TaskRowProps {
   onEdit: () => void
   /** Deletes this task. */
   onDelete: () => void
+  /**
+   * Makes the row draggable for manual ordering. Off while searching: a search spans
+   * days, and an order only means something within one day.
+   */
+  draggable?: boolean
+  /** Reports the start of a drag with this row's id. */
+  onDragStart?: (taskId: string) => void
+  /** Reports dragging over this row, so the list can show the landing spot. */
+  onDragOverRow?: (taskId: string) => void
+  /** Reports a drop onto this row. */
+  onDropOnRow?: (taskId: string) => void
+  /** Reports the end of a drag, for cleanup after a drop elsewhere — or none. */
+  onDragEnd?: () => void
+  /** True while this row is the one being dragged. */
+  isDragging?: boolean
+  /** True while the drop would land on this row. */
+  isDropTarget?: boolean
 }
 
 /**
@@ -48,7 +65,14 @@ export function TaskRow({
   showDate,
   onStatusChange,
   onEdit,
-  onDelete
+  onDelete,
+  draggable = false,
+  onDragStart,
+  onDragOverRow,
+  onDropOnRow,
+  onDragEnd,
+  isDragging = false,
+  isDropTarget = false
 }: TaskRowProps): React.JSX.Element {
   const style = STATUS_STYLE[task.status]
   const running = task.status === 'in_progress'
@@ -61,10 +85,38 @@ export function TaskRow({
       // Not focusable on its own: a `tabIndex={0}` row with no handler is a keyboard trap
       // that announces itself as a control and does nothing. Selection happens through
       // the buttons inside the row, which are already reachable and named.
+      //
+      // No keyboard reorder: `Ctrl+Left/Right` already walks days, so a keyboard move
+      // would fight navigation. Drag is pointer-only; screen-reader order follows the
+      // stored manual order on the next read.
+      draggable={draggable}
+      onDragStart={(event) => {
+        // Firefox refuses the drop without payload data; the id also travels in state.
+        event.dataTransfer.setData('text/plain', task.id)
+        event.dataTransfer.effectAllowed = 'move'
+        onDragStart?.(task.id)
+      }}
+      onDragOver={(event) => {
+        if (!draggable) {
+          return
+        }
+
+        // Admitting the drop is what turns the cursor from forbidden to landing.
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        onDragOverRow?.(task.id)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        onDropOnRow?.(task.id)
+      }}
+      onDragEnd={() => onDragEnd?.()}
       className={[
         'border-border flex items-center gap-3 rounded-md border px-3 py-2',
         task.status === 'cancelled' ? 'opacity-60' : '',
-        task.status === 'done' ? 'text-muted-foreground' : ''
+        task.status === 'done' ? 'text-muted-foreground' : '',
+        isDragging ? 'opacity-50' : '',
+        isDropTarget ? 'border-primary border-t-2' : ''
       ].join(' ')}
     >
       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />

@@ -164,6 +164,28 @@ export async function setTaskStatus(id: string, status: TaskStatusDto): Promise<
 }
 
 /**
+ * Persists the Day view's order after a drag and drop.
+ *
+ * Sends the whole visible day in its new order and takes back the day as stored,
+ * so the caller replaces rather than patches: what is on screen is what landed.
+ *
+ * @param taskDate Day being reordered, as `YYYY-MM-DD`.
+ * @param orderedIds Every visible task id of that day, in the user's order.
+ * @returns The day as stored, in manual order.
+ * @throws TaskApiError when the order is partial, has duplicates, or names a task
+ *   from another day.
+ */
+export async function reorderDay(taskDate: string, orderedIds: string[]): Promise<TaskDto[]> {
+  const result = await window.taskDiary.tasks.reorder({ taskDate, orderedIds })
+
+  if (!result.ok) {
+    throw new TaskApiError(result.error)
+  }
+
+  return result.tasks
+}
+
+/**
  * Searches the whole history.
  *
  * @param request Query, statuses, tag ids and limit.

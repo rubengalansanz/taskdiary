@@ -15,6 +15,7 @@ import {
   createTask,
   deleteTask,
   setTaskStatus,
+  reorderDay,
   TaskApiError,
   updateTask
 } from '../../shared/api/tasks-api'
@@ -167,6 +168,31 @@ export function DayRoute(): React.JSX.Element {
     [taskDate, refresh]
   )
 
+  const handleReorder = useCallback(
+    async (orderedIds: string[]): Promise<void> => {
+      setActionError(null)
+
+      try {
+        // The bridge returns the day as stored, but the cache owns what is on screen:
+        // invalidate first so the refresh below cannot serve the pre-drop order.
+        await reorderDay(taskDate, orderedIds)
+        invalidateDate(taskDate)
+        invalidateSearches()
+        invalidateSummaries()
+        refresh()
+      } catch (cause) {
+        // A refused order leaves the stored order untouched, so the refresh below
+        // restores the pre-drop arrangement — the drag visibly undoes itself.
+        setActionError({
+          code: cause instanceof TaskApiError ? cause.code : 'UNKNOWN',
+          message: cause instanceof Error ? cause.message : 'No se pudo reordenar el día.'
+        })
+        refresh()
+      }
+    },
+    [taskDate, refresh]
+  )
+
   const handleSubmit = useCallback(
     async (values: TaskFormValues): Promise<void> => {
       setActionError(null)
@@ -274,6 +300,9 @@ export function DayRoute(): React.JSX.Element {
               openDialog('edit', task.id)
             }}
             onDelete={(task) => void handleDelete(task)}
+            // While filtering the list holds other days' tasks, where an order is
+            // meaningless — the bridge would refuse it anyway.
+            onReorder={isFiltering ? undefined : (ids) => void handleReorder(ids)}
           />
         </div>
       </div>

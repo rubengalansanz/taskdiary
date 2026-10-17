@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { TaskRow } from './task-row'
 import type { TaskDto, TaskStatusDto } from '../../../../shared/ipc'
 import { formatDayHeading } from '../../shared/lib/date'
@@ -30,6 +31,11 @@ export interface TaskListProps {
   onEdit: (task: TaskDto) => void
   /** Deletes a task. */
   onDelete: (task: TaskDto) => void
+  /**
+   * Persists a dropped order. Absent while searching: results span days and an order
+   * only means something within one day, so rows are not draggable there.
+   */
+  onReorder?: (orderedIds: string[]) => void
 }
 
 /**
@@ -47,10 +53,53 @@ export function TaskList({
   selectedTaskId,
   onStatusChange,
   onEdit,
-  onDelete
+  onDelete,
+  onReorder
 }: TaskListProps): React.JSX.Element {
   const total = tasks?.length ?? 0
   const done = tasks?.filter((task) => task.status === 'done').length ?? 0
+
+  // Drag state lives here rather than in the rows: the drop target is a different row
+  // from the dragged one, and only the list sees both.
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+
+  const reorderable = onReorder !== undefined && !searching && total > 1
+
+  function clearDrag(): void {
+    setDraggedId(null)
+    setOverId(null)
+  }
+
+  function handleDropOnRow(targetId: string): void {
+    setOverId(null)
+
+    if (draggedId === null || tasks === null || onReorder === undefined) {
+      setDraggedId(null)
+      return
+    }
+
+    const ids = tasks.map((task) => task.id)
+
+    if (!ids.includes(targetId) || !ids.includes(draggedId)) {
+      setDraggedId(null)
+      return
+    }
+
+    // Drop lands before the target row. Filtering first keeps the math honest when the
+    // dragged row came from above: indices after removal are the ones that count.
+    const next = ids.filter((id) => id !== draggedId)
+
+    next.splice(next.indexOf(targetId), 0, draggedId)
+    setDraggedId(null)
+
+    // A drop back onto its own spot is not a reorder and must not touch the database.
+    if (next.join() === ids.join()) {
+      return
+    }
+
+    onReorder(next)
+  }
 
   return (
     <section className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
@@ -115,6 +164,13 @@ export function TaskList({
               onStatusChange={(status) => onStatusChange(task, status)}
               onEdit={() => onEdit(task)}
               onDelete={() => onDelete(task)}
+              draggable={reorderable}
+              isDragging={task.id === draggedId}
+              isDropTarget={task.id === overId && task.id !== draggedId}
+              onDragStart={setDraggedId}
+              onDragOverRow={setOverId}
+              onDropOnRow={handleDropOnRow}
+              onDragEnd={clearDrag}
             />
           ))}
         </ul>
