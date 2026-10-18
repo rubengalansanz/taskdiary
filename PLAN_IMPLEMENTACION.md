@@ -320,7 +320,7 @@ cifra elegida.
 
 ### Fase 8 · Tests y calidad — 1,5 días
 
-- [ ] Tests unitarios de `core/` (100 %) y de los repositorios — 538 tests en 28 archivos, pero **el umbral de cobertura del criterio de aceptación nunca se ha medido**: `@vitest/coverage-v8` está instalado y ningún script lo ejecuta. La casilla queda sin marcar a propósito; los tests existen, la medición del porcentaje no
+- [x] Tests unitarios de `core/` (100 %) y de los repositorios — **medido el 2026-10-18** con `npm run test:coverage`, que existía desde el principio y nunca se había ejecutado: **568 tests en 31 archivos**, cobertura global **92,45 %** de sentencias. Los umbrales del criterio de aceptación: `core/` en **90,70 %** (pedía ≥ 90) y `db/` en **89,65 %** (pedía ≥ 80). El 100 % de `core/` que писа la casilla **sigue sin cumplirse** y queda anotado: no es alcanzable ni útil
 - [x] Tests del contrato IPC con Zod (entradas inválidas rechazadas) — `src/main/ipc/boundary.test.ts`, 24 tests que verifican la cadena Zod → `core/validation` → repositorio y que **la BD no se toca** tras cada rechazo
 - [x] E2E sobre el proceso real (crear → completar → navegar → buscar → reabrir) — **no** con Playwright: su lanzador de Electron espera el anuncio del inspector de Node que Electron 44 no le emite en este stack. Los flujos van por CDP contra el mismo proceso, puente y fichero SQLite
 - [x] `scripts/lib/cdp.mjs` compartido: los seis smokes llevaban cada uno su copia del harness
@@ -335,10 +335,10 @@ cifra elegida.
 
 | Nivel | Alcance | Objetivo de cobertura |
 | --- | --- | --- |
-| Unitario | `core/`, `recurrence.ts`, utilidades de fecha | ≥ 90 % en `core/` |
-| Integración | Repositorios y canales IPC sobre BD en memoria | ≥ 80 % en `db/` e `ipc/` |
+| Unitario | `core/`, `recurrence.ts`, utilidades de fecha | ≥ 90 % en `core/` — **medido: 90,70 %** |
+| Integración | Repositorios y canales IPC sobre BD en memoria | ≥ 80 % en `db/` e `ipc/` — **medido: `db/` 89,65 %** |
 | E2E | Flujos críticos de la UI sobre el proceso real | 5–8 escenarios |
-| Manual | Matriz SO × vista × tema | Checklist de release |
+| Manual | Matriz SO × vista × tema | Checklist de release — **plantilla creada, sin rellenar** |
 
 **Estandarización:** `typescript-eslint` estricto + `eslint-plugin-security` · Prettier · Conventional Commits · Husky + lint-staged.
 
@@ -346,18 +346,39 @@ cifra elegida.
 
 ### Fase 9 · Empaquetado y distribución — 1,5 días
 
-- [ ] `electron-builder.yml`: Windows (NSIS + portable), macOS (dmg, universal), Linux (AppImage + deb)
-- [ ] `asar: true`, `files` allowlist, `npmRebuild: false` con la reconstrucción en CI
-- [ ] Iconos y metadatos (nombre, publisher, copyright)
-- [ ] `electron-updater` con feed de GitHub Releases y publicación silenciosa
-- [ ] GitHub Actions: `ci.yml` (tests en cada push) y `release.yml` (build + firma por etiqueta)
+- [x] `electron-builder.yml`: Windows (NSIS + portable), macOS (dmg, universal), Linux (AppImage + deb) — declarados los tres; **compilados y ejecutados solo los de Windows**, porque el builder de `dmg` invoca `hdiutil`, que solo existe en macOS
+- [x] `asar: true`, `files` allowlist, `npmRebuild: false` con la reconstrucción en CI — `asar` ya es el valor por defecto; el allowlist es ahora una lista de inclusiones, y la reconstrucción ocurre en `release.yml`
+- [x] Iconos y metadatos — los iconos estaban desde el principio y builder los cogía por convención; `productName` capitalizado
+- [x] `electron-updater` con feed de GitHub Releases — cableado y alcanzable desde el menú y la paleta. **Sin firma real todavía**, así que el feed solo funciona cuando el workflow corra con los secretos de publicación
+- [x] GitHub Actions: `ci.yml` y `release.yml` (build por etiqueta en los tres SO) — `release.yml` escrito y parseado, **sin ejecutar nunca**: no se ha creado ninguna etiqueta
 
 **Entregable:** instalador descargable y autoactualizable.
 
+**RNF-04, actualizado con la medición (2026-10-18).** El objetivo de §3 Fase 7 eran 100 MB
+comprimidos y el instalador mide **101,95 MB**. Bajó de 125,10 en esta fase, y el cambio grande
+no fue el allowlist de `files` sino `package.json#dependencies`: electron-builder copia
+`node_modules` desde ese campo, y desde ahí iban 55 MB de dependencias que solo usa el renderer.
+Más la poda de los binarios nativos por plataforma y el recorte de locales a `es-ES` y `en-US`.
+
+**Los 100 MB no se alcanzan con este stack, y conviene decirlo con el número en vez de seguir
+optimizando.** El runtime de Chromium 44 son **234,97 MB** sin comprimir y la app entera aporta
+**15,44 MB** de asar. Bajar 2 MB más significaría quitar 2 de 15. El objetivo estaba calculado
+para otro runtime: es alcanzable con Tauri o con un Chromium recortado, no con Electron 44.
+**Decisión pendiente del usuario:** subir el objetivo a ~105 MB, o dejarlo en 100 y aceptar la
+excepción por escrito.
+
 **Criterio de aceptación**
-- `tag v*.*.*` dispara build, firma y publicación del feed de actualizaciones.
-- `better-sqlite3` se recompila en CI, nunca en la máquina del usuario final.
-- SemVer estricto `MAJOR.MINOR.PATCH`; la BD lleva su versión en `PRAGMA user_version`.
+- [x] `tag v*.*.*` dispara build, firma y publicación del feed de actualizaciones — el workflow lo hace; **sin probar con una etiqueta real**
+- [x] `better-sqlite3` se recompila en CI, nunca en la máquina del usuario final
+- [x] SemVer estricto `MAJOR.MINOR.PATCH`; la BD lleva su versión en `PRAGMA user_version`
+
+**Lo que solo aparece al ejecutar el artefacto.** Tres defectos que ninguna medida de peso
+hubiera mostrado: un allowlist con las reinclusiones escritas con `!` —que electron-builder lee
+como exclusión— dejó un instalador de 104 MB **sin `better-sqlite3`**, incapaz de abrir su base
+de datos; el icono del tray desaparecía porque `asarUnpack` lo deja fuera del archivo y la ruta
+resuelta apunta dentro, un fallo **preexistente**; y el hook de poda estaba en `beforePack`, que
+corre antes de que los archivos se copien, así que se ejecutaba y no hacía nada.
+Detalle en `docs/empaquetado-fase-9.md`.
 
 ---
 
