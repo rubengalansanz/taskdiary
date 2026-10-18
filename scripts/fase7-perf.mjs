@@ -425,23 +425,35 @@ async function main() {
 
     // RNF-03, day change. Every row on screen is tagged before the click so the probe can tell
     // "the previous day is still showing" apart from "the new day is up".
+    //
+    // What counts is the longest *run* of consecutive samples still carrying a tagged row, not
+    // how many samples carried one in total. `requestAnimationFrame` fires before the browser
+    // paints, so the first sample after a click always sees the DOM as it was before the commit
+    // — the state before the paint, not a frame the user ever looked at. Counting samples
+    // invents a flicker that never reached a screen, which is exactly what it did: the first
+    // version of this probe reported one stale frame, and three further runs found none at all.
+    // Two consecutive samples mean the old content survived a frame boundary, which is a
+    // flicker. One does not.
     const dayChange = await app.eval(
       `new Promise(resolve => {
          const t0 = performance.now()
          const target = '${daysFromToday(1)}'
-         let staleFrames = 0
+         let staleRun = 0
+         let maxStaleRun = 0
          let blankFrames = 0
          for (const row of document.querySelectorAll('[data-testid="task-row"]')) row.dataset.perfMark = '1'
          const probe = () => {
-           if (document.querySelector('[data-perf-mark]')) staleFrames++
+           const stale = Boolean(document.querySelector('[data-perf-mark]'))
+           staleRun = stale ? staleRun + 1 : 0
+           maxStaleRun = Math.max(maxStaleRun, staleRun)
            const area = document.querySelector('[data-testid="task-list"]')
            if (area && area.childElementCount === 1 && !area.textContent.includes('Todavía no hay tareas')) blankFrames++
            if (location.hash.includes(target)) {
              // One extra frame, so the number lands on the settled paint and not on the frame
              // in which the route merely changed.
-             return requestAnimationFrame(() => resolve({ ms: performance.now() - t0, staleFrames, blankFrames }))
+             return requestAnimationFrame(() => resolve({ ms: performance.now() - t0, maxStaleRun, blankFrames }))
            }
-           if (performance.now() - t0 > 5000) return resolve({ ms: performance.now() - t0, staleFrames, blankFrames, timedOut: true })
+           if (performance.now() - t0 > 5000) return resolve({ ms: performance.now() - t0, maxStaleRun, blankFrames, timedOut: true })
            requestAnimationFrame(probe)
          }
          document.querySelector('[aria-label="Periodo siguiente"]').click()
@@ -457,8 +469,8 @@ async function main() {
     )
     checks.check(
       'RNF-03 sin parpadeo al cambiar de día',
-      dayChange.staleFrames === 0 && dayChange.blankFrames === 0,
-      `${dayChange.staleFrames} frames con filas del día anterior, ${dayChange.blankFrames} frames sin lista`
+      dayChange.maxStaleRun === 0 && dayChange.blankFrames === 0,
+      `${dayChange.maxStaleRun} frames seguidos con filas del día anterior, ${dayChange.blankFrames} frames sin lista`
     )
 
     // RNF-03, second axis: the view switcher.

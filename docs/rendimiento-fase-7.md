@@ -24,33 +24,33 @@ máquina, y la metodología es lo que hace comparables las corridas.
 
 | RNF | Métrica | Objetivo | Medido | |
 | --- | --- | --- | --- | --- |
-| RNF-01 | Arranque en frío hasta ventana visible | ≤ 3000 ms | **1899 ms** (mediana de 3) | Cumple |
-| RNF-02 | `Ctrl+N` hasta el campo de título | ≤ 120 ms | **34.7 ms** | Cumple |
-| RNF-02 | Enviar hasta la fila nueva en pantalla | ≤ 120 ms | **26.6 ms** (mediana de 5) | Cumple |
-| RNF-03 | Cambio de día hasta el frame asentado | ≤ 100 ms | **15.7 ms** | Cumple |
-| RNF-03 | Cambio de vista hasta el frame asentado | ≤ 100 ms | **18.8 ms** | Cumple |
-| RNF-03 | Sin parpadeo al cambiar de día | 0 frames | **1 frame** con filas del día anterior | **No cumple** |
-| RNF-04 | Tamaño del instalador comprimido | ≤ 100 MB | **125.2 MB** | **No cumple** |
-| RNF-05 | RAM en reposo | ≤ 250 MB | **126.4 MB** (privada) | Cumple |
+| RNF-01 | Arranque en frío hasta ventana visible | ≤ 3000 ms | **1846 ms** (mediana de 3) | Cumple |
+| RNF-02 | `Ctrl+N` hasta el campo de título | ≤ 120 ms | **31,3 ms** | Cumple |
+| RNF-02 | Enviar hasta la fila nueva en pantalla | ≤ 120 ms | **31,2 ms** (mediana de 5) | Cumple |
+| RNF-03 | Cambio de día hasta el frame asentado | ≤ 100 ms | **21,9 ms** | Cumple |
+| RNF-03 | Cambio de vista hasta el frame asentado | ≤ 100 ms | **23,9 ms** | Cumple |
+| RNF-03 | Sin parpadeo al cambiar de día | 0 frames | **0 frames** | Cumple |
+| RNF-04 | Tamaño del instalador comprimido | ≤ 100 MB | **125,1 MB** | **No cumple** |
+| RNF-05 | RAM en reposo | ≤ 250 MB | **118,2 MB** (privada) | Cumple |
 
-Dos requisitos fallan de verdad, y ninguno de los dos es de rendimiento puro.
+Siete de ocho. Un solo requisito falla de verdad, y no es de rendimiento puro.
 
 ---
 
-## Los dos fallos
+## El fallo
 
-### RNF-04 · El instalador pesa 125,2 MB y el objetivo son 100
+### RNF-04 · El instalador pesa 125,1 MB y el objetivo son 100
 
-Es el único número que seAleja del objetivo, y la causa está localizada:
+La causa está localizada y no es el código:
 
 | Pieza | Sin comprimir |
 | --- | --- |
 | `taskdiary.exe` (Electron) | 235 MB |
 | `resources/` completo | 108 MB |
-| └ `app.asar` | **81,6 MB** |
+| └ `app.asar` | **81,0 MB** |
 | `locales/` (49 MB, uno por idioma) | 49 MB |
 
-**El `app.asar` pesa 81,6 MB para una aplicación cuyo bundle de renderer son 1,37 MB.** La causa
+**El `app.asar` pesa 81 MB para una aplicación cuyo bundle de renderer son 1,37 MB.** La causa
 no es el código: el allowlist `files` de `electron-builder.yml` excluye `src/*` y unos pocos
 ficheros, pero no las devDependencies, así que `@types/*`, `electron` y dependencias de
 desarrollo viajan dentro del archivo. El propio `electron-builder` lo dice en su salida, en una
@@ -58,16 +58,6 @@ línea que dice «duplicate dependency references» y lista `@types/react@19.3.0
 
 Los dos controles que quedan son de la Fase 9, no de esta: un `files` que excluya
 `devDependencies` y `electronLanguages` para podar los 49 MB de locales que nadie va a usar.
-
-### RNF-03 · Un frame con las filas del día anterior
-
-Un solo frame (~16 ms), pero es exactamente lo que el requisito prohíbe: se pulsa «Periodo
-siguiente», el título ya dice el día nuevo y durante un frame las filas siguen siendo las del
-día anterior. La lista se pinta antes de que `useTasks` cambie su estado a «cargando», así que
-hay un frame con el día nuevo y el contenido viejo.
-
-Es menor y es real. No se ha tocado aquí porque la medición es lo que tenía que decidir qué se
-arregla, no arreglarlo de paso.
 
 ---
 
@@ -98,18 +88,18 @@ verdes. Es el mismo argumento por el que los flujos van por CDP en vez de Playwr
 
 ---
 
-## Tres instrumentalidades que este trabajo encontró
+## Cuatro instrumentalidades que este trabajo encontró
 
 La mitad del valor de este informe está en lo que el script **dio por bueno y era falso**. Las
-tres se corrigieron antes de escribir una línea de conclusión, y las tres son el tipo de error
-que sobrevive porque el número que produce parece normal.
+cuatro se corrigieron antes de escribir una línea de conclusión, y las cuatro son el tipo de
+error que sobrevive porque el número que produce parece normal.
 
 **1. Sumar el working set entre procesos cuenta las páginas compartidas N veces.**
 La primera versión summed `WorkingSetSize` del árbol entero de procesos y dio **444 MB** contra
 un presupuesto de 250 MB: un fallo del 78 % que habría mandado la fase entera a optimizar
-memoria. La app usa **126 MB**. Chromium comparte sus DLL, sus fuentes y parte grande de sus
+memoria. La app usa **118 MB**. Chromium comparte sus DLL, sus fuentes y parte grande de sus
 arenas de reserva entre los cuatro procesos, y el working set suma las páginas compartidas
-una vez por proceso. Aquí la misma corrida da 432 MB de working set contra 126 MB privado. El
+una vez por proceso. Aquí la misma corrida da 445 MB de working set contra 118 MB privado. El
 RNF se responde con memoria privada (`WorkingSetPrivate` en Windows, PSS en `/proc/*/smaps_rollup`
 en Linux).
 
@@ -126,6 +116,17 @@ selector de vistas dentro del árbol, y React lo remonta: el nodo que la sonda t
 quedaba huérfano con su `aria-pressed` viejo. **La app funcionaba; la sonda mentía.** La sonda
 ahora vuelve a consultar el nodo en cada frame.
 
+**4. Contar muestras en `requestAnimationFrame` cuenta el estado previo al pintado.**
+La sonda de parpadeo marcaba las filas del día saliente y contaba cuántas muestras las
+encontraban. Dio **1 frame con filas del día anterior**, y el plan llegó a registrar un defecto
+que no existía. La verdad es que `requestAnimationFrame` se ejecuta **antes** de pintar: la
+primera muestra tras un clic siempre ve el DOM tal como estaba antes del commit, que es el
+estado previo a la pintura y no un frame que nadie llegara a ver. Tres corridas adicionales
+dieron **cero** frames seguidos. Lo que cuenta no es cuántas muestras salieron así, sino
+la **racha más larga de muestras consecutivas** con las filas viejas: dos seguidas significan
+que el contenido sobrevivió a un límite de frame, que es un parpadeo; una no. El defecto que
+casi se reporta era, irónicamente, un artefacto de la medición del defecto.
+
 ---
 
 ## Qué decide esto sobre el resto de la Fase 7
@@ -134,8 +135,8 @@ La fase pedía dos optimizaciones más. Con estos números, ninguna se justifica
 
 | Pedido por el plan | Lo que dice la medición |
 | --- | --- |
-| Virtualización de listas de más de 100 elementos | El cambio de día con 30 filas cuesta 15,7 ms, un tercio del presupuesto. El coste no está en el número de filas. |
-| Lazy-loading de vistas pesadas | El arranque completa en 1899 ms con 1093 ms de margen, y el cambio de vista en 18,8 ms. El bundle del renderer son 1,37 MB. |
+| Virtualización de listas de más de 100 elementos | El cambio de día con 30 filas cuesta 21,9 ms, poco más de un quinto del presupuesto. El coste no está en el número de filas. |
+| Lazy-loading de vistas pesadas | El arranque completa en 1846 ms con 1154 ms de margen, y el cambio de vista en 23,9 ms. El bundle del renderer son 1,37 MB. |
 
 Ninguna de las dos se construye **por ahora**. Se anotan en el documento de fase como
 disponibles, con el número que las justifies, para que la decisión se pueda revisar si el

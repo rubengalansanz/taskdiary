@@ -272,23 +272,23 @@ y ninguno se veía desde los números en verde:
 
 | Métrica | Objetivo | Medido (2026-10-18) | |
 | --- | --- | --- | --- |
-| Arranque en frío hasta ventana visible | < 3 s | 1,9 s (mediana de 3) | Cumple |
-| Crear una tarea (con atajo) | < 120 ms | 34,7 ms abrir · 26,6 ms enviar | Cumple |
-| Cambio de vista o de día | < 100 ms, sin parpadeo | 15,7 ms · 18,8 ms · **1 frame con filas del día anterior** | **Parcial** |
-| RAM en reposo | < 250 MB | 126,4 MB (memoria privada) | Cumple |
-| Tamaño del instalador | < 100 MB comprimido | **125,2 MB** | **No cumple** |
+| Arranque en frío hasta ventana visible | < 3 s | 1,85 s (mediana de 3) | Cumple |
+| Crear una tarea (con atajo) | < 120 ms | 31,3 ms abrir · 31,2 ms enviar | Cumple |
+| Cambio de vista o de día | < 100 ms, sin parpadeo | 21,9 ms · 23,9 ms · 0 frames | Cumple |
+| RAM en reposo | < 250 MB | 118,2 MB (memoria privada) | Cumple |
+| Tamaño del instalador | < 100 MB comprimido | **125,1 MB** | **No cumple** |
 
-**Estado (2026-10-18).** Los cuatro primeros objetivos se cumplen con margen y el quinto no.
-Dos requisitos fallan de verdad:
+**Estado (2026-10-18).** Cuatro de los cinco objetivos se cumplen con margen; **el único
+requisito que falla es el tamaño del instalador**, y no es de rendimiento puro:
 
-1. **RNF-04, el instalador pesa 125,2 MB.** La causa está localizada y no es el código: el
-   allowlist `files` de `electron-builder.yml` no excluye las devDependencies, así que
-   `app.asar` pesa 81,6 MB para un bundle de renderer de 1,37 MB. Suman 49 MB más de locales
-   que la app no usa. **Los dos controles pertenecen a la Fase 9**, que es quien posee
-   `electron-builder.yml`; aquí solo se deja medido y con la causa apuntada.
-2. **RNF-03, un frame (~16 ms) con las filas del día anterior** tras pulsar «Periodo siguiente».
-   La lista se pinta antes de que `useTasks` pase a «cargando». Es el único defecto de
-   rendimiento real que queda, y no está corregido.
+- **RNF-04, el instalador pesa 125,1 MB.** La causa está localizada y no es el código: el
+  allowlist `files` de `electron-builder.yml` no excluye las devDependencies, así que
+  `app.asar` pesa 81 MB para un bundle de renderer de 1,37 MB. Suman 49 MB más de locales que
+  la app no usa. **Los dos controles pertenecen a la Fase 9**, que es quien posee
+  `electron-builder.yml`; aquí solo se deja medido y con la causa apuntada.
+
+Todo lo demás pasó con holgura, y esa holgura es lo que decidió el resto de la fase: no hay
+presión medida que justifique virtualización ni lazy-loading (ver arriba).
 
 **Las tres líneas de este checklist que el plan daba por pendientes y ya estaban hechas**
 (el plan las describía como trabajo futuro; el código las tenía desde antes):
@@ -311,9 +311,10 @@ con la ventana oculta a cambio de nada que la app necesite. Dejar un flag de seg
 rendimiento puesto «por si acaso» es optimización especulativa: aquí no se pone.
 
 **Medición, no casillas.** El script y su metodología están en
-`docs/rendimiento-fase-7.md`, que incluye los cuatro límites de lo que mide y tres casos en los
-que el propio instrumento dio números falsos antes de corregirse. Una cifra sin método al lado
-es una cifra elegida.
+`docs/rendimiento-fase-7.md`, que incluye los cuatro límites de lo que mide y **cuatro casos en
+los que el propio instrumento dio números falsos antes de corregirse** — uno de ellos un
+parpadeo que casi se reporta como defecto y no existía. Una cifra sin método al lado es una
+cifra elegida.
 
 ---
 
