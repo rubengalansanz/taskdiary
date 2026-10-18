@@ -116,7 +116,7 @@ export function TaskList({
   }
 
   return (
-    <section className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+    <section data-testid="task-list" className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold tracking-tight">
           {searching ? 'Resultados' : formatDayHeading(taskDate)}

@@ -17,6 +17,8 @@
  *             waitFor: (expression: string, timeoutMs?: number) => Promise<unknown>,
  *             logs: () => string,
  *             userDataDir: string,
+ *             pid: number,
+ *             startedAt: number,
  *             close: (options?: { keepProfile?: boolean }) => Promise<void> }} RunningApp
  */
 import { spawn } from 'node:child_process'
@@ -141,6 +143,11 @@ export async function launchApp(port, reuseUserDataDir) {
   // only: on a desktop this flag would turn off a protection for no reason.
   const sandboxFlags = process.platform === 'linux' ? ['--no-sandbox'] : []
 
+  // Taken before the spawn, not after: a cold-start measurement that starts counting once the
+  // process is already up measures nothing. The perf script needs the gap between "we decided
+  // to start" and "the user sees the window", and that gap is decided here.
+  const startedAt = Date.now()
+
   const child = spawn(
     electron,
     ['.', ...sandboxFlags, `--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`],
@@ -221,6 +228,8 @@ ${output.trim() || '(sin salida)'}`)
     },
     logs: () => output,
     userDataDir,
+    pid: child.pid,
+    startedAt,
     close: async (options = {}) => {
       stoppedOnPurpose = true
       const exited = new Promise((resolveExit) => child.once('exit', resolveExit))
