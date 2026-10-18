@@ -1,0 +1,158 @@
+name: Release
+
+# `tag v*.*.*` builds the three targets and publishes them to GitHub Releases.
+#
+# A matrix over three runners is not a convenience here, it is the whole mechanism. The dmg
+# builder shells out to `hdiutil`, which exists only on macOS, so that artifact cannot be
+# produced from a Windows or Linux runner — not even inside a container. Declaring the macOS
+# target in electron-builder.yml is a promise; this workflow is where the promise is kept.
+#
+# Every job runs the full `verify` first. A release built from a commit whose unit suite was
+# never run is how a broken version reaches people who cannot read the source, and the cost of
+# checking is a minute next to the minutes of packaging.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+# A re-pushed tag must not leave two half-finished releases behind.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verificar antes de publicar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint, tipos y tests
+        run: npm run verify
+
+  build:
+    name: Empaquetar
+    needs: verify
+    strategy:
+      # One runner per platform, and failures do not cancel the others: a macOS packaging
+      # failure should not cost you the Windows artifact you already had.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-24.04
+            label: Windows (NSIS + portable)
+            args: --win nsis portable
+          - os: macos-15
+            label: macOS (dmg universal)
+            args: --mac dmg --universal
+          - os: ubuntu-24.04
+            label: Linux (AppImage + deb)
+            args: --linux AppImage deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Librerías de sistema para Electron
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/install-electron-libs.sh
+
+      - name: Descargar el binario de Electron
+        run: node node_modules/electron/install.js
+
+      - name: Reconstruir better-sqlite3 para Electron
+        # N-API means the prebuilt binary serves both runtimes on a developer machine, but the
+        # packaged app runs inside Electron, so the rebuild belongs here and only here (Riesgo 2
+        # de §5 del plan). This is also the only step that needs the network to reach
+        # electronjs.org, which is why it is not in postinstall.
+        run: npx electron-builder install-app-deps
+
+      - name: Firmar con el certificado de publicación
+        uses: electron-builder/action@v1
+        with:
+          args: ${{ matrix.args }} --publish never
+        env:
+          # Secrets are absent on a fork or a tag pushed from a machine that has not been set
+          # up. electron-builder treats an empty CSC_LINK as "build unsigned" rather than
+          # failing, so an unconfigured repository still produces artifacts — it just cannot
+          # auto-update. That is the honest failure mode: a build you cannot install is worse
+          # than a build that is unsigned but honest about it.
+          CSC_LINK: ${{ secrets.MACOS_CERT_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar en GitHub Releases
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          # electron-builder wrote them into dist/ with the artifactName templates from
+          # electron-builder.yml; this uploads whatever the platform actually produced.
+          files: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+          generate_release_notes: true
+
+  updater-feed:
+    name: Publicar el feed de actualizaciones
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # electron-updater downloads `latest.yml` on Windows, `latest-mac.yml` on macOS and
+      # `latest-linux.yml` on Linux, all relative to the release. Without them the app starts,
+      # finds no feed, and silently never updates — so their absence is a fact worth failing on
+      # rather than something to discover on a user's machine.
+      - name: Comprobar que el feed existe
+        run: |
+          set -euo pipefail
+          missing=0
+          for feed in latest.yml latest-mac.yml latest-linux.yml; do
+            if gh release download "${{ github.ref_name }}" --pattern "$feed" --dir /tmp/feed 2>/dev/null; then
+              echo "OK  $feed"
+            else
+              echo "FALTA  $feed"
+              missing=1
+            fi
+          done
+          exit $missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: El bloque publish de electron-builder coincide con este repositorio
+        run: |
+          set -euo pipefail
+          node -e "
+            const cfg = require('fs').readFileSync('electron-builder.yml', 'utf8')
+            const owner = /owner:\s*(\S+)/.exec(cfg)?.[1]
+            const repo  = /repo:\s*(\S+)/.exec(cfg)?.[1]
+            const full  = '${{ github.repository }}'
+            const ok = full === owner + '/' + repo
+            console.log((ok ? 'OK  ' : 'MAL ') + 'electron-builder.yml publica en ' + owner + '/' + repo + ', este repo es ' + full)
+            process.exit(ok ? 0 : 1)
+          "
