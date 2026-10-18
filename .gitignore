@@ -18,6 +18,7 @@ opencode.jsonc
 # Dependencias y artefactos de build
 node_modules/
 dist/
+dist-*/
 out/
 release/
 *.tsbuildinfo

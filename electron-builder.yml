@@ -1,24 +1,65 @@
 appId: com.local.taskdiary
-productName: taskdiary
+# Capitalised on purpose: this is what the installer calls itself in the Windows list, the
+# macOS bundle and the Linux desktop entry. Lowercase taskdiary reads like a package name.
+productName: TaskDiary
 directories:
   buildResources: build
+# The installer measured 125.1 MB against a 100 MB target (docs/rendimiento-fase-7.md), and
+# the reason was here: with no devDependencies exclusion, `app.asar` shipped 81 MB for an app
+# whose renderer bundle is 1.37 MB. `@types/react` travelled inside it six times over --
+# electron-builder says so out loud in its own "duplicate dependency references" line.
+#
+# This is an ALLOW list, not a deny list, and that distinction is the whole fix: every entry
+# below is something that must ship, and anything not named here does not. The previous deny
+# list shipped the entire repository minus a handful of globs.
+#
+# The runtime set was read out of the built output rather than guessed: `out/main/index.js`
+# requires exactly `@electron-toolkit/utils`, `better-sqlite3`, `xlsx` and `zod`, and the
+# preload requires `@electron-toolkit/preload`. React and friends are already inside the Vite
+# renderer bundle and are NOT needed here -- that assumption was checked, not believed.
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - package.json
+  - out/**/*
+  # The tray and window icons are imported from the repo's resources/ directory, not from the
+  # Vite output -- `?asset` resolves them to wherever electron-vite emitted them, which is not
+  # under out/. Leaving this out is how the tray silently stops existing in a packaged build.
+  - resources/**/*
+  - node_modules/@electron-toolkit/utils/**/*
+  - node_modules/@electron-toolkit/preload/**/*
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/file-uri-to-path/**/*
+  - node_modules/node-addon-api/**/*
+  - node_modules/xlsx/**/*
+  - node_modules/zod/**/*
+
 asarUnpack:
   - resources/**
+  # A .node file cannot be dlopen'd out of an asar archive -- it is a zip, not a directory.
+  # better-sqlite3 ships one prebuilt binary per platform under `prebuilds/`, and its loader
+  # resolves them at require time, so the whole prebuilds tree has to be on disk.
+  - node_modules/better-sqlite3/prebuilds/**/*
+# Windows ships two artifacts, not one: the installed app and a single file that runs without
+# installing. The portable build is what makes the app testable on a machine you cannot touch,
+# which is the whole point of having it.
 win:
   executableName: taskdiary
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
 mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     # No camera or microphone entries on purpose: the main process denies every
@@ -31,8 +72,10 @@ dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
   target:
-    - AppImage
-    - deb
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
   maintainer: TaskDiary
   category: Utility
 appImage:
@@ -40,6 +83,22 @@ appImage:
 # N-API: the prebuilt better-sqlite3 binary serves Node and Electron alike, so no
 # rebuild is needed on developer machines. CI runs `install-app-deps` before packing.
 npmRebuild: false
+
+# better-sqlite3 ships a prebuilt binary per platform and asarUnpack put all eight on disk.
+# The hook keeps only the one the artifact can load, using the platform being packaged rather
+# than the host running the build, so a cross-build still gets the binary it needs.
+#
+# `afterPack` and not `beforePack`: beforePack runs before files are copied into the bundle,
+# so the unpacked directory this script deletes from does not exist yet. The hook ran, found
+# nothing, and silently did nothing — which is the worst possible way for a size fix to fail.
+afterPack: scripts/prune-prebuilds.mjs
+
+# Only the languages the app is actually written for. The default ships a .pak per locale,
+# which was 49 MB of the unpacked tree and most of the difference between a 125 MB installer
+# and a 100 MB one.
+electronLanguages:
+  - es-ES
+  - en-US
 # GitHub Releases feed, matching PLAN_IMPLEMENTACION.md §10. Fase 9 adds signing.
 publish:
   provider: github

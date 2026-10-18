@@ -8,6 +8,7 @@ import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/da
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
 import { startTaskReminders } from './notifications'
+import { resolveUnpackedResource } from './core/packaged-resource'
 import { activateWindow, createAppTray, hideOnMinimize } from './tray'
 import { TagsRepository } from './db/repositories/tags-repo'
 import { registerTaskIpcHandlers } from './ipc/tasks'
@@ -310,7 +311,12 @@ if (!app.requestSingleInstanceLock()) {
       // to wherever the build actually emitted it. Hand-built `join(__dirname, ...)` paths do
       // not survive bundling: nothing is emitted at `out/resources`, and the tray silently did
       // not exist.
-      iconPath: icon,
+      //
+      // `asarUnpack` then moves that file out of the archive, so in a packaged build the
+      // resolved path points inside `app.asar` at a file that is now sitting next to it under
+      // `app.asar.unpacked`. Nothing throws: the image just comes back empty and the tray is
+      // absent, which is what the first packaged build of Fase 9 did.
+      iconPath: resolveUnpackedResource(icon),
       onActivate: (): void => {
         activateWindow(BrowserWindow.getAllWindows()[0], createWindow)
       },

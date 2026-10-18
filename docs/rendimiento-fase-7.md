@@ -30,16 +30,25 @@ máquina, y la metodología es lo que hace comparables las corridas.
 | RNF-03 | Cambio de día hasta el frame asentado | ≤ 100 ms | **21,9 ms** | Cumple |
 | RNF-03 | Cambio de vista hasta el frame asentado | ≤ 100 ms | **23,9 ms** | Cumple |
 | RNF-03 | Sin parpadeo al cambiar de día | 0 frames | **0 frames** | Cumple |
-| RNF-04 | Tamaño del instalador comprimido | ≤ 100 MB | **125,1 MB** | **No cumple** |
+| RNF-04 | Tamaño del instalador comprimido | ≤ 100 MB | **101,95 MB** | **No cumple** (ver abajo) |
 | RNF-05 | RAM en reposo | ≤ 250 MB | **118,2 MB** (privada) | Cumple |
 
-Siete de ocho. Un solo requisito falla de verdad, y no es de rendimiento puro.
+Siete de ocho. El único requisito que sigue sin cumplirse es el tamaño del instalador, y en
+la Fase 9 bajó de **125,10 MB a 101,95 MB** sin llegar a 100. El detalle está en
+`docs/empaquetado-fase-9.md`; aquí basta con decir que **el objetivo es casi inalcanzable con
+Electron 44**, porque el runtime son 235 MB sin comprimir y la app aporta 15,44 MB de asar.
 
 ---
 
-## El fallo
+## El fallo que queda abierto
 
-### RNF-04 · El instalador pesa 125,1 MB y el objetivo son 100
+### RNF-04 · El instalador pesa 101,95 MB y el objetivo son 100
+
+**Actualizado por la Fase 9 (2026-10-18).** Bajó de 125,10 a 101,95 MB: se corrigió el
+allowlist de `files`, se movieron 55 MB de dependencias que solo usa el renderer a
+`devDependencies`, y se poda el paquete nativo por plataforma. Faltan 1,95 MB (2 %) y el motivo
+de que sean difíciles está medido en `docs/empaquetado-fase-9.md`: **no es la app la que pesa,
+es Chromium.** La lectura original de esta sección, ya superada, era:
 
 La causa está localizada y no es el código:
 
