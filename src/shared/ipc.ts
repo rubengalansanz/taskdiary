@@ -508,6 +508,14 @@ export const IPC_CHANNELS = {
   dataImport: 'taskdiary:data:import',
   /** Phase 3: every tag in use, with how many tasks carry it. */
   tagList: 'taskdiary:tag:list',
+  /** Fase 9: ask the native menu to check for an app update. */
+  menuCheckUpdates: 'taskdiary:menu:check-updates',
+  /** Fase 9: the renderer asks main to check the GitHub Releases feed. */
+  appUpdateCheck: 'taskdiary:app:update-check',
+  /** Fase 9: the renderer asks main to install a downloaded update and restart. */
+  appUpdateInstall: 'taskdiary:app:update-install',
+  /** Fase 9: main pushes updater lifecycle changes to the renderer. */
+  appUpdateStatus: 'taskdiary:app:update-status',
   /**
    * Phase 2: channels the native menu uses to reach the renderer.
    *
@@ -714,7 +722,8 @@ export const MENU_COMMAND_CHANNELS = [
   IPC_CHANNELS.menuToday,
   IPC_CHANNELS.menuPreviousDay,
   IPC_CHANNELS.menuNextDay,
-  IPC_CHANNELS.menuCompleteSelected
+  IPC_CHANNELS.menuCompleteSelected,
+  IPC_CHANNELS.menuCheckUpdates
 ] as const
 
 /** Name of a command the native menu can push. */
@@ -747,6 +756,45 @@ export interface TaskDiaryMenuApi {
   onCommand(callback: (command: MenuCommand) => void): () => void
 }
 
+/**
+ * Where the updater is, as the renderer sees it (Fase 9).
+ *
+ * Mirrors `UpdateState` in `main/core/updater.ts` on purpose: the contract is the only thing
+ * the renderer is allowed to import, so the state travels as data rather than as a type the
+ * renderer reaches across for.
+ */
+export const updateStateSchema = z.enum([
+  'idle',
+  'checking',
+  'available',
+  'downloading',
+  'downloaded',
+  'unsupported',
+  'error'
+])
+
+/** One updater event, with the version it concerns and a message fit to show. */
+export const updateStatusSchema = z.object({
+  state: updateStateSchema,
+  /** Version being offered or installed, when there is one. */
+  version: z.string().nullable(),
+  /** Human readable reason, already translated by `describeUpdateFailure`. */
+  message: z.string().nullable()
+})
+
+/** One updater event as it travels over the bridge. */
+export type UpdateStatusDto = z.infer<typeof updateStatusSchema>
+
+/** Fase 9 app updates. */
+export interface TaskDiaryAppApi {
+  /** Asks main to check the release feed. Resolves false when there was nothing to do. */
+  check(): Promise<boolean>
+  /** Installs a downloaded update and restarts. Resolves false when none was ready. */
+  install(): Promise<boolean>
+  /** Subscribes to updater changes. Filters before handing anything over, like the menu. */
+  onStatus(callback: (status: z.infer<typeof updateStatusSchema>) => void): () => void
+}
+
 /** The single API exposed to the renderer through `contextBridge`. */
 export interface TaskDiaryApi {
   /** Phase 0 database diagnostics. */
@@ -761,6 +809,8 @@ export interface TaskDiaryApi {
   stats: StatsApi
   /** Phase 3 tags. */
   tags: TagApi
+  /** Fase 9 app updates. */
+  app: TaskDiaryAppApi
   /** Phase 2 native menu accelerators. */
   menu: TaskDiaryMenuApi
   /** Light/dark theme bridge. */

@@ -65,6 +65,13 @@ export function useRunCommand(): (channel: string) => void {
           window.dispatchEvent(new CustomEvent(COMPLETE_SELECTED_EVENT))
           break
 
+        case IPC_CHANNELS.menuCheckUpdates:
+          // Fire and forget: the answer arrives on the `appUpdateStatus` channel, so there is
+          // nothing to await and nothing to show at the call site. A rejection here would be an
+          // unhandled promise, and `check()` resolves false rather than throwing anyway.
+          window.taskDiary.app.check().catch(() => undefined)
+          break
+
         default:
           break
       }

@@ -41,7 +41,8 @@ export const PALETTE_COMMANDS: readonly PaletteCommand[] = [
     channel: IPC_CHANNELS.menuCompleteSelected,
     label: 'Completar seleccionada',
     shortcut: 'Ctrl+Enter'
-  }
+  },
+  { channel: IPC_CHANNELS.menuCheckUpdates, label: 'Buscar actualizaciones', shortcut: '' }
 ]
 
 /**

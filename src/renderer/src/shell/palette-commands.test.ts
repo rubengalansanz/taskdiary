@@ -13,15 +13,31 @@ import { PALETTE_COMMANDS, filterCommands, nextIndex, normalizeQuery } from './p
 
 describe('the command list', () => {
   it('offers exactly the commands the native menu already fires', () => {
-    // Five channels, no more: the palette is a second door to the same five actions, so a
-    // sixth entry here would mean an action exists in one place and not the other.
-    expect(PALETTE_COMMANDS).toHaveLength(5)
+    // Six channels, no more: the palette is a second door to the same six actions, so a
+    // seventh entry here would mean an action exists in one place and not the other. Fase 9
+    // added "Buscar actualizaciones" to both sides together — a menu item with no palette entry
+    // would be a command nobody finds.
+    expect(PALETTE_COMMANDS).toHaveLength(6)
   })
 
-  it('gives every command a non-empty Spanish label and a shortcut hint', () => {
+  it('gives every command a Spanish label', () => {
     for (const command of PALETTE_COMMANDS) {
       expect(command.label.length).toBeGreaterThan(0)
-      expect(command.shortcut.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('claims a shortcut only for the commands the menu actually accelerates', () => {
+    // The file header's own rule: showing a hint that does not fire is worse than showing none.
+    // "Buscar actualizaciones" has no accelerator on purpose — the updater refuses outright
+    // outside a packaged build, so a shortcut that silently does nothing on every `npm run dev`
+    // would teach the shortcut is unreliable. Every other command keeps its real accelerator.
+    const withoutShortcut = PALETTE_COMMANDS.filter((command) => command.shortcut.length === 0)
+
+    expect(withoutShortcut.map((command) => command.label)).toEqual(['Buscar actualizaciones'])
+
+    for (const command of PALETTE_COMMANDS.filter((entry) => entry.shortcut.length > 0)) {
+      expect(command.shortcut).not.toBe('')
+      expect(command.label.length).toBeGreaterThan(0)
     }
   })
 

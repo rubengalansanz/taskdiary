@@ -7,8 +7,20 @@ import {
   type IpcChannel,
   type TaskDiaryApi,
   type TagListResultDto,
-  type TaskDiaryDbProbeResult
+  type TaskDiaryDbProbeResult,
+  type UpdateStatusDto
 } from '../shared/ipc'
+
+/** The updater states the bridge forwards. Mirrors `updateStateSchema` in the contract. */
+const UPDATE_STATES = [
+  'idle',
+  'checking',
+  'available',
+  'downloading',
+  'downloaded',
+  'unsupported',
+  'error'
+] as const
 
 /**
  * Preload bridge.
@@ -71,6 +83,52 @@ const tagApi: TaskDiaryApi['tags'] = {
   list: (): Promise<TagListResultDto> => invoke(IPC_CHANNELS.tagList)
 }
 
+/**
+ * Whether a value from main is an updater status (Fase 9).
+ *
+ * A shape check rather than the Zod schema from the contract: the preload runs in its own
+ * context and pulling the validators across would evaluate them there. This mirrors what
+ * `isMenuCommand` already does for the menu channel.
+ *
+ * @param value Whatever arrived on the channel.
+ * @returns True when it names a state and carries the two fields the renderer reads.
+ */
+function isUpdateStatus(value: unknown): value is UpdateStatusDto {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+
+  return (
+    typeof candidate.state === 'string' &&
+    UPDATE_STATES.includes(candidate.state as (typeof UPDATE_STATES)[number]) &&
+    (typeof candidate.version === 'string' || candidate.version === null) &&
+    (typeof candidate.message === 'string' || candidate.message === null)
+  )
+}
+
+/** Updater lifecycle pushed from main (Fase 9). */
+const appApi: TaskDiaryApi['app'] = {
+  check: (): Promise<boolean> => invoke(IPC_CHANNELS.appUpdateCheck),
+  install: (): Promise<boolean> => invoke(IPC_CHANNELS.appUpdateInstall),
+  onStatus: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown): void => {
+      // Same rule as the menu bridge: the preload cannot know in advance what main will send,
+      // so it validates instead of forwarding whatever arrives.
+      if (isUpdateStatus(status)) {
+        callback(status)
+      }
+    }
+
+    ipcRenderer.on(IPC_CHANNELS.appUpdateStatus, listener)
+
+    return (): void => {
+      ipcRenderer.removeListener(IPC_CHANNELS.appUpdateStatus, listener)
+    }
+  }
+}
+
 const menu: TaskDiaryApi['menu'] = {
   onCommand: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, command: unknown): void => {
@@ -108,6 +166,7 @@ const taskDiary: TaskDiaryApi = {
       invoke<TaskDiaryDbProbeResult>(IPC_CHANNELS.dbProbe)
   },
   tasks,
+  app: appApi,
   data,
   stats,
   tags: tagApi,

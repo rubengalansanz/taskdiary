@@ -8,6 +8,7 @@ import { hasTable, openDatabase, pingDatabase, readSqliteVersion } from './db/da
 import { readSchemaVersion, runMigrations } from './db/migrate'
 import { TasksRepository } from './db/repositories/tasks-repo'
 import { startTaskReminders } from './notifications'
+import { startAppUpdater } from './updater'
 import { resolveUnpackedResource } from './core/packaged-resource'
 import { activateWindow, createAppTray, hideOnMinimize } from './tray'
 import { TagsRepository } from './db/repositories/tags-repo'
@@ -100,7 +101,8 @@ const MENU_CHANNEL = {
   today: IPC_CHANNELS.menuToday,
   previousDay: IPC_CHANNELS.menuPreviousDay,
   nextDay: IPC_CHANNELS.menuNextDay,
-  completeSelected: IPC_CHANNELS.menuCompleteSelected
+  completeSelected: IPC_CHANNELS.menuCompleteSelected,
+  checkUpdates: IPC_CHANNELS.menuCheckUpdates
 } as const
 
 function sendMenuCommand(channel: string): void {
@@ -141,6 +143,18 @@ function buildApplicationMenu(): void {
         { role: 'copy', label: 'Copiar' },
         { role: 'paste', label: 'Pegar' },
         { role: 'selectAll', label: 'Seleccionar todo' }
+      ]
+    },
+    {
+      label: 'Ayuda',
+      submenu: [
+        {
+          label: 'Buscar actualizaciones',
+          // No accelerator: the updater is refused outright outside a packaged build, and an
+          // accelerator that silently does nothing on every `npm run dev` teaches the shortcut
+          // is unreliable.
+          click: () => sendMenuCommand(MENU_CHANNEL.checkUpdates)
+        }
       ]
     },
     {
@@ -301,6 +315,11 @@ if (!app.requestSingleInstanceLock()) {
     // Resolved per call rather than captured: the window does not exist yet here,
     // and a dialog needs a parent to be modal to.
     registerDataIpcHandlers(tasks, () => BrowserWindow.getAllWindows()[0])
+
+    // Announced rather than triggered: the updater never checks on its own, but it still has to
+    // tell the renderer which state this build starts in, or the UI waits forever for an event
+    // that only a packaged build would send.
+    startAppUpdater()
 
     buildApplicationMenu()
 
