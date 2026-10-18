@@ -141,6 +141,58 @@ const TASK_COLUMNS = `
   created_at, updated_at, started_at, completed_at, series_id, sort_order
 `.trim()
 
+/*
+ * The statements behind the three reads the app runs on every navigation.
+ *
+ * They are exported because Fase 7 asked for `EXPLAIN QUERY PLAN` over them, and a test that
+ * copied the SQL would verify a copy: the day it drifted from the repository it would still be
+ * green, which is the exact shape of a test that pretends to verify something — the same failure
+ * `transfer-roundtrip.test.ts` had when it opened a second in-memory database and called it
+ * persistence. `query-plan.test.ts` plans these strings, not a transcription of them.
+ */
+
+/** One calendar day. The Day view and the reminder loop both live on this. */
+export const LIST_BY_DATE_SQL = `
+  SELECT ${TASK_COLUMNS}
+    FROM tasks
+   WHERE task_date = ?
+   ORDER BY (sort_order IS NULL), sort_order ASC, (start_min IS NULL), start_min ASC, created_at ASC
+`
+
+/** An inclusive day range, ordered so Week and Month can render it as it arrives. */
+export const LIST_BY_RANGE_SQL = `
+  SELECT ${TASK_COLUMNS}
+    FROM tasks
+   WHERE task_date BETWEEN ? AND ?
+   ORDER BY task_date ASC, (start_min IS NULL), start_min ASC, created_at ASC
+`
+
+/**
+ * One aggregate per day, in SQL.
+ *
+ * Fase 4's acceptance criterion: the Week, Month and Heatmap views count days without ever
+ * receiving a task row, so this is the single hottest statement in the app.
+ */
+export const SUMMARIZE_RANGE_SQL = `
+  SELECT
+    task_date AS date,
+    SUM(CASE WHEN status = 'pending'     THEN 1 ELSE 0 END) AS pending,
+    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+    SUM(CASE WHEN status = 'done'        THEN 1 ELSE 0 END) AS done,
+    SUM(CASE WHEN status = 'cancelled'   THEN 1 ELSE 0 END) AS cancelled,
+    SUM(CASE WHEN status <> 'cancelled'
+             THEN COALESCE(estimate_min, 0) ELSE 0 END) AS estimate_min,
+    SUM(CASE WHEN status = 'done' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+             THEN strftime('%s', completed_at) - strftime('%s', started_at)
+             ELSE 0 END) AS real_seconds,
+    SUM(CASE WHEN status = 'done' AND (started_at IS NULL OR completed_at IS NULL)
+             THEN 1 ELSE 0 END) AS unmeasured_done
+  FROM tasks
+ WHERE task_date BETWEEN ? AND ?
+ GROUP BY task_date
+ ORDER BY task_date ASC
+`
+
 /** Shape of an already-grouped `GROUP BY task_date` row. `SUM` yields numbers, never null. */
 interface DaySummaryRow {
   date: string
@@ -362,14 +414,7 @@ export class TasksRepository {
   listByDate(taskDate: string): Task[] {
     this.materializeRange(taskDate, taskDate)
 
-    const rows = this.database
-      .prepare(
-        `SELECT ${TASK_COLUMNS}
-           FROM tasks
-          WHERE task_date = ?
-          ORDER BY (sort_order IS NULL), sort_order ASC, (start_min IS NULL), start_min ASC, created_at ASC`
-      )
-      .all(taskDate) as TaskRow[]
+    const rows = this.database.prepare(LIST_BY_DATE_SQL).all(taskDate) as TaskRow[]
 
     return this.attachTags(rows.map(toTask))
   }
@@ -454,14 +499,7 @@ export class TasksRepository {
 
     this.materializeRange(fromDate, toDate)
 
-    const rows = this.database
-      .prepare(
-        `SELECT ${TASK_COLUMNS}
-           FROM tasks
-          WHERE task_date BETWEEN ? AND ?
-          ORDER BY task_date ASC, (start_min IS NULL), start_min ASC, created_at ASC`
-      )
-      .all(fromDate, toDate) as TaskRow[]
+    const rows = this.database.prepare(LIST_BY_RANGE_SQL).all(fromDate, toDate) as TaskRow[]
 
     return this.attachTags(rows.map(toTask))
   }
@@ -494,27 +532,7 @@ export class TasksRepository {
 
     this.materializeRange(fromDate, toDate)
 
-    const rows = this.database
-      .prepare(
-        `SELECT
-           task_date AS date,
-           SUM(CASE WHEN status = 'pending'     THEN 1 ELSE 0 END) AS pending,
-           SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
-           SUM(CASE WHEN status = 'done'        THEN 1 ELSE 0 END) AS done,
-           SUM(CASE WHEN status = 'cancelled'   THEN 1 ELSE 0 END) AS cancelled,
-           SUM(CASE WHEN status <> 'cancelled'
-                    THEN COALESCE(estimate_min, 0) ELSE 0 END) AS estimate_min,
-           SUM(CASE WHEN status = 'done' AND started_at IS NOT NULL AND completed_at IS NOT NULL
-                    THEN strftime('%s', completed_at) - strftime('%s', started_at)
-                    ELSE 0 END) AS real_seconds,
-           SUM(CASE WHEN status = 'done' AND (started_at IS NULL OR completed_at IS NULL)
-                    THEN 1 ELSE 0 END) AS unmeasured_done
-         FROM tasks
-        WHERE task_date BETWEEN ? AND ?
-        GROUP BY task_date
-        ORDER BY task_date ASC`
-      )
-      .all(fromDate, toDate) as DaySummaryRow[]
+    const rows = this.database.prepare(SUMMARIZE_RANGE_SQL).all(fromDate, toDate) as DaySummaryRow[]
 
     return rows.map(toDaySummary)
   }
