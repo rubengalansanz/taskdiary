@@ -4,6 +4,13 @@ name: CI
 # most — a form that parsed its tags and saved something else, an index that made two
 # recurring series impossible on the same day — all shipped with a green local suite, because
 # nothing ran the app end to end until now.
+#
+# The runner image is pinned rather than floating. `ubuntu-latest` was scheduled to move to
+# Ubuntu 26 on 2026-10-19, which would have moved the OS under three jobs that were green on
+# the day before. Pinning freezes the image the suite has actually been passing on, so a
+# runner migration becomes a deliberate bump with its own diff instead of an incident.
+#
+# The action majors were three behind and still running on Node 20, which GitHub has deprecated.
 
 on:
   push:
@@ -19,12 +26,12 @@ concurrency:
 jobs:
   quality:
     name: Lint, tipos y tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -39,13 +46,13 @@ jobs:
 
   end-to-end:
     name: Flujos sobre la app real
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: quality
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -74,13 +81,13 @@ jobs:
 
   smoke:
     name: Smokes de fase
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: quality
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm

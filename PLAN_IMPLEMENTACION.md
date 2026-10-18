@@ -257,39 +257,76 @@ y ninguno se veía desde los números en verde:
 
 ---
 
-### Fase 7 · Rendimiento y seguridad — 1 día
+### Fase 7 · Rendimiento y seguridad — 1 día — **EN CURSO**
 
-- [ ] Revisión de consultas con `EXPLAIN QUERY PLAN`
-- [ ] Virtualización en listas de más de 100 elementos
-- [ ] Lazy-loading de vistas pesadas
-- [ ] Hardening: `setWindowOpenHandler` bloqueando ventanas nuevas, `will-navigate` bloqueado, CSP en `index.html`, sin `remote`
-- [ ] Desactivar funciones de Chromium no usadas y `backgroundThrottling: false` solo si hace falta
-- [ ] Medición de arranque, tamaño del instalador y RAM frente a los RNF
+- [x] Revisión de consultas con `EXPLAIN QUERY PLAN` — **hecho y fijado en test** (2026-10-18). `src/main/db/query-plan.test.ts` planifica el SQL exportado del repositorio, no una copia
+- [x] Virtualización en listas de más de 100 elementos — **no procede**: la medición dice que no hay presión. Ver «Estado» abajo
+- [x] Lazy-loading de vistas pesadas — **no procede**: el arranque deja 1093 ms de margen
+- [x] Hardening: `setWindowOpenHandler` bloqueando ventanas nuevas, `will-navigate` bloqueado, CSP en `index.html`, sin `remote` — **ya estaba hecho**, no pendiente (ver «Estado»)
+- [ ] Desactivar funciones de Chromium no usadas y `backgroundThrottling: false` solo si hace falta — **decidido en contra**, con motivo (ver «Estado»)
+- [x] Medición de arranque, tamaño del instalador y RAM frente a los RNF — `scripts/fase7-perf.mjs`; informe en `docs/rendimiento-fase-7.md`
 
 **Entregable:** cumple RNF-01 a RNF-05 y RNF-11/12.
 
 **Criterio de aceptación**
 
-| Métrica | Objetivo |
+| Métrica | Objetivo | Medido (2026-10-18) | |
+| --- | --- | --- | --- |
+| Arranque en frío hasta ventana visible | < 3 s | 1,9 s (mediana de 3) | Cumple |
+| Crear una tarea (con atajo) | < 120 ms | 34,7 ms abrir · 26,6 ms enviar | Cumple |
+| Cambio de vista o de día | < 100 ms, sin parpadeo | 15,7 ms · 18,8 ms · **1 frame con filas del día anterior** | **Parcial** |
+| RAM en reposo | < 250 MB | 126,4 MB (memoria privada) | Cumple |
+| Tamaño del instalador | < 100 MB comprimido | **125,2 MB** | **No cumple** |
+
+**Estado (2026-10-18).** Los cuatro primeros objetivos se cumplen con margen y el quinto no.
+Dos requisitos fallan de verdad:
+
+1. **RNF-04, el instalador pesa 125,2 MB.** La causa está localizada y no es el código: el
+   allowlist `files` de `electron-builder.yml` no excluye las devDependencies, así que
+   `app.asar` pesa 81,6 MB para un bundle de renderer de 1,37 MB. Suman 49 MB más de locales
+   que la app no usa. **Los dos controles pertenecen a la Fase 9**, que es quien posee
+   `electron-builder.yml`; aquí solo se deja medido y con la causa apuntada.
+2. **RNF-03, un frame (~16 ms) con las filas del día anterior** tras pulsar «Periodo siguiente».
+   La lista se pinta antes de que `useTasks` pase a «cargando». Es el único defecto de
+   rendimiento real que queda, y no está corregido.
+
+**Las tres líneas de este checklist que el plan daba por pendientes y ya estaban hechas**
+(el plan las describía como trabajo futuro; el código las tenía desde antes):
+
+| Línea del plan | Dónde está |
 | --- | --- |
-| Arranque en frío hasta ventana visible | < 3 s |
-| Crear una tarea (con atajo) | < 120 ms |
-| Cambio de vista o de día | < 100 ms, sin parpadeo |
-| RAM en reposo | < 250 MB |
-| Tamaño del instalador | < 100 MB comprimido |
+| `setWindowOpenHandler` bloqueando ventanas | `src/main/index.ts:216` |
+| `will-navigate` bloqueado | `src/main/index.ts:225` |
+| CSP en `index.html` | `src/renderer/index.html:8` |
+| `sandbox` / `contextIsolation` / `nodeIntegration` | `src/main/index.ts:198` |
+| Sin `remote` | nunca se instaló |
+
+Además hay dos medidas que el plan no pedía y ya existen: los handlers de permiso deniegan
+todo (`index.ts:234`) y `backgroundThrottling` se deja **en su valor por defecto a
+propósito**. Chromium estrangula los temporizadores del renderer cuando la ventana está
+oculta, y desde la Fase 6 la app se minimiza a bandeja, así que la pregunta era real. La
+respuesta es que lo que depende del tiempo —el bucle de recordatorios de 30 s— vive en el
+proceso main, que no se estrangula; y desactivar el estrangulamiento costaría CPU constante
+con la ventana oculta a cambio de nada que la app necesite. Dejar un flag de seguridad o de
+rendimiento puesto «por si acaso» es optimización especulativa: aquí no se pone.
+
+**Medición, no casillas.** El script y su metodología están en
+`docs/rendimiento-fase-7.md`, que incluye los cuatro límites de lo que mide y tres casos en los
+que el propio instrumento dio números falsos antes de corregirse. Una cifra sin método al lado
+es una cifra elegida.
 
 ---
 
 ### Fase 8 · Tests y calidad — 1,5 días
 
-- [ ] Tests unitarios de `core/` (100 %) y de los repositorios
-- [ ] Tests del contrato IPC con Zod (entradas inválidas rechazadas)
+- [ ] Tests unitarios de `core/` (100 %) y de los repositorios — 538 tests en 28 archivos, pero **el umbral de cobertura del criterio de aceptación nunca se ha medido**: `@vitest/coverage-v8` está instalado y ningún script lo ejecuta. La casilla queda sin marcar a propósito; los tests existen, la medición del porcentaje no
+- [x] Tests del contrato IPC con Zod (entradas inválidas rechazadas) — `src/main/ipc/boundary.test.ts`, 24 tests que verifican la cadena Zod → `core/validation` → repositorio y que **la BD no se toca** tras cada rechazo
 - [x] E2E sobre el proceso real (crear → completar → navegar → buscar → reabrir) — **no** con Playwright: su lanzador de Electron espera el anuncio del inspector de Node que Electron 44 no le emite en este stack. Los flujos van por CDP contra el mismo proceso, puente y fichero SQLite
 - [x] `scripts/lib/cdp.mjs` compartido: los seis smokes llevaban cada uno su copia del harness
 - [x] CI en GitHub Actions: lint+tipos+unit primero, luego flujos y un paso por fase
 - [x] Husky + lint-staged, encadenados **con** el hook de revisión por IA (`core.hooksPath` haría que git ignorase `.git/hooks/pre-commit`)
 - [ ] Tests E2E con Playwright — bloqueado por el lanzador; reevaluar en Fase 9 con otra versión de Electron
-- [ ] Lint y formateo en el pipeline
+- [x] Lint y formateo en el pipeline — el job `quality` ejecuta `npm run verify`, que es `eslint` + `tsc` de los dos proyectos + `vitest`
 
 **Entregable:** pipeline verde.
 
